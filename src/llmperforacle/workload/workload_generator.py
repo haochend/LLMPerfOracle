@@ -58,8 +58,13 @@ class WorkloadGenerator:
         # Network configuration
         self.bytes_per_token = config.get("bytes_per_token_estimate_for_network", 2)
         
+        # Data parallelism load balancing
+        self.load_balancing_strategy = config.get("load_balancing_strategy", "round_robin")
+        self.framework_request_counts = {fw_id: 0 for fw_id in target_frameworks_map.keys()}
+        
         logger.info(
-            f"WorkloadGenerator initialized with {len(self.client_profiles)} client profiles"
+            f"WorkloadGenerator initialized with {len(self.client_profiles)} client profiles, "
+            f"load balancing: {self.load_balancing_strategy}"
         )
     
     def _parse_client_profiles(self, profiles_config: List[Dict[str, Any]]) -> List[ClientProfile]:
@@ -200,13 +205,12 @@ class WorkloadGenerator:
             "client_node_0", "framework_entry_0", prompt_data_size
         )
         
-        # Select target framework (round-robin for now)
-        framework_ids = list(self.target_frameworks_map.keys())
-        if not framework_ids:
+        # Select target framework based on load balancing strategy
+        target_fw_id = self._select_target_framework(request)
+        if not target_fw_id:
             logger.error("No target frameworks available")
             return
         
-        target_fw_id = framework_ids[self.request_counter % len(framework_ids)]
         target = self.target_frameworks_map[target_fw_id]
         
         # Log request arrival
@@ -268,3 +272,72 @@ class WorkloadGenerator:
                             profile.follow_up_inter_arrival_time_dist_config
                         )
                     session_data["next_turn_time"] = self.simpy_env.now + follow_up_iat
+    
+    def _select_target_framework(self, request: Request) -> Optional[str]:
+        """Select target framework based on load balancing strategy.
+        
+        Supports:
+        - round_robin: Distribute requests evenly in order
+        - random: Random selection
+        - least_loaded: Select framework with fewest pending requests (queue depth)
+        - weighted_random: Random selection with configurable weights
+        - session_affinity: Route conversational turns to same framework
+        """
+        framework_ids = list(self.target_frameworks_map.keys())
+        if not framework_ids:
+            return None
+        
+        if self.load_balancing_strategy == "round_robin":
+            # Classic round-robin
+            target_fw_id = framework_ids[self.request_counter % len(framework_ids)]
+            
+        elif self.load_balancing_strategy == "random":
+            # Random selection
+            target_fw_id = random.choice(framework_ids)
+            
+        elif self.load_balancing_strategy == "least_loaded":
+            # Select framework with smallest queue
+            min_queue_size = float('inf')
+            target_fw_id = framework_ids[0]
+            
+            for fw_id in framework_ids:
+                target = self.target_frameworks_map[fw_id]
+                if isinstance(target, simpy.Store):
+                    queue_size = len(target.items)
+                    if queue_size < min_queue_size:
+                        min_queue_size = queue_size
+                        target_fw_id = fw_id
+                        
+        elif self.load_balancing_strategy == "weighted_random":
+            # Weighted random (weights would need to be configured)
+            weights = self.config.get("framework_weights", {})
+            fw_weights = [weights.get(fw_id, 1.0) for fw_id in framework_ids]
+            target_fw_id = random.choices(framework_ids, weights=fw_weights)[0]
+            
+        elif self.load_balancing_strategy == "session_affinity":
+            # Route conversational turns to same framework
+            if request.is_conversational_turn:
+                # Check if we've seen this session before
+                session_fw_mapping = getattr(self, '_session_fw_mapping', {})
+                if request.session_id in session_fw_mapping:
+                    target_fw_id = session_fw_mapping[request.session_id]
+                else:
+                    # New session, use round-robin
+                    target_fw_id = framework_ids[self.request_counter % len(framework_ids)]
+                    session_fw_mapping[request.session_id] = target_fw_id
+                    self._session_fw_mapping = session_fw_mapping
+            else:
+                # Non-conversational, use round-robin
+                target_fw_id = framework_ids[self.request_counter % len(framework_ids)]
+                if hasattr(self, '_session_fw_mapping'):
+                    self._session_fw_mapping[request.session_id] = target_fw_id
+                    
+        else:
+            # Default to round-robin
+            logger.warning(f"Unknown load balancing strategy: {self.load_balancing_strategy}, using round_robin")
+            target_fw_id = framework_ids[self.request_counter % len(framework_ids)]
+        
+        # Track request counts
+        self.framework_request_counts[target_fw_id] += 1
+        
+        return target_fw_id

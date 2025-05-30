@@ -111,12 +111,21 @@ class VirtualNetworkLink:
 class VirtualHardwarePlatform:
     """Manages all virtual hardware devices and provides resource request APIs."""
     
+    # Efficiency factors for realistic hardware utilization
+    # These represent typical achieved performance vs theoretical peak
+    MFU_EFFICIENCY = 0.5  # 50% Model FLOPs Utilization (typical for LLMs)
+    MBU_EFFICIENCY = 0.8  # 80% Memory Bandwidth Utilization (typical for memory-bound ops)
+    
     def __init__(self):
         """Initialize an empty hardware platform."""
         self.simpy_env: Optional[simpy.Environment] = None
         self.compute_devices: Dict[str, VirtualComputeDevice] = {}
         self.network_links: Dict[Tuple[str, str], VirtualNetworkLink] = {}
         self.model_characteristics_db: Dict[str, Any] = {}
+        
+        # Instance-level efficiency factors (can be overridden)
+        self.mfu_efficiency = self.MFU_EFFICIENCY
+        self.mbu_efficiency = self.MBU_EFFICIENCY
     
     def initialize(
         self,
@@ -171,6 +180,10 @@ class VirtualHardwarePlatform:
             f"VirtualHardwarePlatform initialized with {len(self.compute_devices)} "
             f"compute devices and {len(self.network_links)} network links"
         )
+        logger.info(
+            f"Hardware efficiency factors - MFU: {self.mfu_efficiency:.1%}, "
+            f"MBU: {self.mbu_efficiency:.1%}"
+        )
     
     def submit_computation_task(
         self, device_id: str, task_description: Dict[str, Any]
@@ -210,17 +223,21 @@ class VirtualHardwarePlatform:
             with device.memory_bandwidth_resource.request() as mem_req:
                 yield mem_req
                 
-                # Calculate compute time
+                # Calculate compute time with MFU efficiency
                 flops_required = task_description.get("flops_required_fp16", 0)
                 peak_tflops_fp16 = device.peak_tflops.get("fp16", 100)
-                compute_time_s = flops_required / (peak_tflops_fp16 * 1e12)
+                # Apply MFU efficiency factor to account for real-world utilization
+                effective_tflops = peak_tflops_fp16 * self.mfu_efficiency
+                compute_time_s = flops_required / (effective_tflops * 1e12)
                 
-                # Calculate memory access time
+                # Calculate memory access time with MBU efficiency
                 memory_bytes = (
                     task_description.get("memory_read_bytes", 0) +
                     task_description.get("memory_write_bytes", 0)
                 )
-                memory_access_time_s = memory_bytes / (device.memory_gbps * 1e9)
+                # Apply MBU efficiency factor to account for real-world utilization
+                effective_bandwidth_gbps = device.memory_gbps * self.mbu_efficiency
+                memory_access_time_s = memory_bytes / (effective_bandwidth_gbps * 1e9)
                 
                 # Determine effective time (simplified Roofline model)
                 is_memory_bound = task_description.get("is_memory_bound_hint", False)
@@ -233,9 +250,20 @@ class VirtualHardwarePlatform:
                 # Simulate the task execution
                 yield self.simpy_env.timeout(effective_time_s)
                 
+                # Calculate actual utilization metrics
+                if effective_time_s > 0:
+                    # MFU: Actual FLOPs achieved / Peak FLOPs possible in the time taken
+                    actual_mfu = flops_required / (peak_tflops_fp16 * 1e12 * effective_time_s)
+                    # MBU: Actual bandwidth achieved / Peak bandwidth
+                    actual_mbu = memory_bytes / (device.memory_gbps * 1e9 * effective_time_s)
+                else:
+                    actual_mfu = 0.0
+                    actual_mbu = 0.0
+                
                 logger.debug(
                     f"Task {task_id} completed on {device_id} in {effective_time_s:.6f}s "
-                    f"(compute: {compute_time_s:.6f}s, memory: {memory_access_time_s:.6f}s)"
+                    f"(compute: {compute_time_s:.6f}s, memory: {memory_access_time_s:.6f}s) "
+                    f"MFU: {actual_mfu:.1%}, MBU: {actual_mbu:.1%}"
                 )
     
     def allocate_memory(self, device_id: str, size_bytes: int) -> simpy.Process:
@@ -331,3 +359,22 @@ class VirtualHardwarePlatform:
             VirtualComputeDevice object or None if not found
         """
         return self.compute_devices.get(device_id)
+    
+    def set_efficiency_factors(self, mfu: Optional[float] = None, mbu: Optional[float] = None):
+        """Set custom efficiency factors for hardware utilization.
+        
+        Args:
+            mfu: Model FLOPs Utilization (0.0 to 1.0)
+            mbu: Memory Bandwidth Utilization (0.0 to 1.0)
+        """
+        if mfu is not None:
+            if not 0.0 <= mfu <= 1.0:
+                raise ValueError(f"MFU must be between 0.0 and 1.0, got {mfu}")
+            self.mfu_efficiency = mfu
+            logger.info(f"Updated MFU efficiency to {mfu:.1%}")
+            
+        if mbu is not None:
+            if not 0.0 <= mbu <= 1.0:
+                raise ValueError(f"MBU must be between 0.0 and 1.0, got {mbu}")
+            self.mbu_efficiency = mbu
+            logger.info(f"Updated MBU efficiency to {mbu:.1%}")

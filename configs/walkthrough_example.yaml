@@ -1,0 +1,163 @@
+# LLMPerfOracle Simulation Configuration Walkthrough
+# This file demonstrates all the key configuration options with explanations
+
+# ===== SIMULATION SETTINGS =====
+# Controls the overall simulation behavior
+simulation:
+  max_simulation_time: 30  # Run for 30 seconds (quick demo)
+  random_seed: 42          # For reproducible results
+
+# Path to the model characteristics database
+# This JSON file contains performance profiles for different LLM models
+model_characteristics_db_path: "./configs/model_params.json"
+
+# ===== HARDWARE CONFIGURATION =====
+# Defines the virtual hardware environment
+hardware_profile:
+  # Define compute devices (GPUs/CPUs)
+  compute_devices:
+    # First GPU - based on NVIDIA A100 80GB profile
+    - device_id: "gpu0"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312        # 312 TFLOPS for FP16 operations
+        int8: 624        # 624 TFLOPS for INT8 operations
+      memory_capacity_bytes: 80_000_000_000  # 80 GB HBM
+      memory_gbps: 2039  # Memory bandwidth in GB/s
+      processing_units: 108  # Number of streaming multiprocessors
+    
+    # Second GPU - identical configuration
+    - device_id: "gpu1"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000
+      memory_gbps: 2039
+      processing_units: 108
+  
+  # Define network links between devices
+  network_links:
+    # Client to server connection (simulates internet/datacenter network)
+    - link_id: "client_to_server"
+      source_id: "client_node_0"     # Virtual client node
+      dest_id: "framework_entry_0"   # LLM framework entry point
+      bandwidth_bps: 10_000_000_000   # 10 Gbps
+      latency_s: 0.0001              # 100 microseconds
+      bidirectional: true            # Creates reverse link automatically
+    
+    # GPU to GPU connection (for multi-GPU setups)
+    - link_id: "gpu0_to_gpu1"
+      source_id: "gpu0"
+      dest_id: "gpu1"
+      bandwidth_bps: 600_000_000_000  # 600 Gbps (NVLink)
+      latency_s: 0.0000005           # 0.5 microseconds
+      bidirectional: true
+
+# ===== WORKLOAD CONFIGURATION =====
+# Defines the request patterns and client behavior
+workload:
+  total_duration: 30  # Generate requests for 30 seconds
+  bytes_per_token_estimate_for_network: 2  # Network overhead per token
+  load_balancing_strategy: "round_robin"   # For multi-instance deployments
+  
+  # Define different types of clients/workloads
+  client_profiles:
+    # Profile 1: Interactive chatbot users
+    - profile_name: "chatbot_users"
+      weight: 0.7  # 70% of requests come from this profile
+      
+      # Time between new conversations (exponential distribution)
+      inter_arrival_time_dist_config:
+        type: "Exponential"
+        rate: 2.0  # Average 2 requests per second
+      
+      # Input prompt length distribution (log-normal)
+      prompt_tokens_dist_config:
+        type: "LogNormal"
+        mean: 150    # Average ~150 tokens
+        sigma: 50    # With some variance
+        is_int: true # Round to integer tokens
+      
+      # Maximum output tokens requested
+      max_output_tokens_dist_config:
+        type: "Uniform"
+        low: 100
+        high: 500
+        is_int: true
+      
+      # Conversation behavior
+      conversational_probability: 0.8  # 80% chance of follow-up
+      streaming_response_probability: 0.95  # 95% want streaming
+      
+      # Time between conversational turns
+      follow_up_inter_arrival_time_dist_config:
+        type: "Exponential"
+        rate: 0.2  # ~5 seconds between turns
+    
+    # Profile 2: Batch processing/API users  
+    - profile_name: "api_batch_users"
+      weight: 0.3  # 30% of requests
+      
+      inter_arrival_time_dist_config:
+        type: "Constant"
+        value: 1.0  # Steady 1 request per second
+      
+      # Longer prompts for batch processing
+      prompt_tokens_dist_config:
+        type: "Uniform"
+        low: 500
+        high: 1500
+        is_int: true
+      
+      max_output_tokens_dist_config:
+        type: "Constant"
+        value: 1000  # Fixed output length
+        is_int: true
+      
+      conversational_probability: 0.0    # No conversations
+      streaming_response_probability: 0.0 # No streaming needed
+
+# ===== LLM FRAMEWORK CONFIGURATION =====
+# Configure the serving framework(s) to test
+frameworks_to_test:
+  # Test configuration 1: Single GPU vLLM
+  - name: "vllm_single_gpu"
+    type: "VLLM"  # Framework type
+    is_target_for_workload: true  # Route requests here
+    config:
+      model_profile_id: "Llama2-13B"  # Which model to simulate
+      gpu_id: "gpu0"                  # Which GPU to use
+      
+      # vLLM-specific parameters
+      block_size: 16                # Tokens per KV cache block
+      max_num_seqs: 256            # Max concurrent sequences
+      max_num_batched_tokens: 4096 # Max tokens in a batch
+      scheduler_iteration_delay_s: 0.0001  # Scheduling overhead
+      bytes_per_token_estimate_for_network: 2
+
+  # Test configuration 2: Data parallel deployment
+  - name: "vllm_replica_2"
+    type: "VLLM"
+    is_target_for_workload: true
+    config:
+      model_profile_id: "Llama2-13B"
+      gpu_id: "gpu1"  # Uses second GPU
+      block_size: 16
+      max_num_seqs: 256
+      max_num_batched_tokens: 4096
+      scheduler_iteration_delay_s: 0.0001
+      bytes_per_token_estimate_for_network: 2
+
+# ===== METRICS CONFIGURATION =====
+# Controls what metrics to collect and where to save them
+metrics_config:
+  # Which percentiles to calculate for latencies
+  percentiles_to_calculate: [0.5, 0.9, 0.95, 0.99]
+  
+  # Ignore first 30 seconds for steady-state analysis
+  warm_up_duration_s: 5
+  
+  # Output file paths
+  output_summary_json_path: "experiments/results/walkthrough_summary.json"
+  output_requests_csv_path: "experiments/results/walkthrough_requests.csv"

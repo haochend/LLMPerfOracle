@@ -120,6 +120,108 @@ frameworks_to_test:
       max_num_seqs: 256
 ```
 
+## Multi-GPU Parallelism Support
+
+LLMPerfOracle now supports simulation of multi-GPU parallelism strategies:
+
+### Tensor Parallelism (TP)
+Splits model layers across GPUs, with each GPU computing a portion of each layer:
+
+```yaml
+frameworks_to_test:
+  - name: "vllm_tp4"
+    type: "ParallelVLLM"
+    config:
+      model_profile_id: "Llama2-13B"
+      parallelism:
+        strategy: "TP"
+        tp_degree: 4
+        gpu_ids: ["gpu0", "gpu1", "gpu2", "gpu3"]
+```
+
+### Pipeline Parallelism (PP)
+Divides model layers into stages, with each stage assigned to different GPUs:
+
+```yaml
+frameworks_to_test:
+  - name: "vllm_pp2"
+    type: "ParallelVLLM"
+    config:
+      model_profile_id: "GPT-3-175B"
+      parallelism:
+        strategy: "PP"
+        pp_stages: 2
+        num_microbatches_per_request: 4
+        gpu_ids: ["gpu0", "gpu1"]
+```
+
+### Combined TP+PP
+Combines both strategies for maximum parallelism:
+
+```yaml
+frameworks_to_test:
+  - name: "vllm_tp2_pp2"
+    type: "ParallelVLLM"
+    config:
+      model_profile_id: "LargeModel-100B"
+      parallelism:
+        strategy: "TP_PP"
+        tp_degree: 2
+        pp_stages: 2
+        gpu_ids: ["gpu0", "gpu1", "gpu2", "gpu3"]
+```
+
+### Data Parallelism (DP)
+Replicates the model across multiple instances for higher throughput:
+
+```yaml
+# Define multiple framework instances
+frameworks_to_test:
+  - name: "replica_1"
+    type: "VLLM"
+    is_target_for_workload: true
+    config:
+      model_profile_id: "Llama2-7B"
+      gpu_id: "gpu0"
+      
+  - name: "replica_2"
+    type: "VLLM"
+    is_target_for_workload: true
+    config:
+      model_profile_id: "Llama2-7B"
+      gpu_id: "gpu1"
+
+# Configure load balancing
+workload:
+  load_balancing_strategy: "least_loaded"  # Options: round_robin, random, least_loaded, weighted_random, session_affinity
+```
+
+### Network Topology for Multi-GPU
+Define inter-GPU network links to simulate communication overhead:
+
+```yaml
+hardware_profile:
+  network_links:
+    # NVLink connections within a node
+    - link_id: "gpu0_to_gpu1"
+      source_id: "gpu0"
+      dest_id: "gpu1"
+      bandwidth_bps: 600_000_000_000  # 600 GB/s
+      latency_s: 0.000001
+      bidirectional: true
+    
+    # InfiniBand connections across nodes
+    - link_id: "gpu0_to_gpu4"
+      source_id: "gpu0"
+      dest_id: "gpu4"
+      bandwidth_bps: 200_000_000_000  # 200 GB/s
+      latency_s: 0.000005
+      bidirectional: true
+```
+
+### Complete Multi-GPU Example
+See `configs/example_parallel_experiment.yaml` for a comprehensive multi-GPU configuration demonstrating all parallelism strategies.
+
 ## Extending the Simulator
 
 ### Adding a New Framework
@@ -129,7 +231,8 @@ frameworks_to_test:
    - `handle_incoming_request()`
    - `processing_loop()`
    - `get_status()`
-3. Register the framework in `FRAMEWORK_CLASS_MAP`
+3. For parallelism support, inherit from `ParallelVLLMFramework` or implement your own parallelism logic
+4. Register the framework in `FRAMEWORK_CLASS_MAP`
 
 ### Adding New Workload Patterns
 
@@ -144,12 +247,15 @@ The simulator uses a JSON database (`configs/model_params.json`) to store model-
 - Model dimensions (hidden size, layers, attention heads)
 - Computational requirements (FLOPs per token)
 - Memory requirements (KV cache size per token)
+- Per-layer statistics for accurate parallelism simulation
+- Tensor parallelism sharding information
 
 Pre-configured models include:
 - Llama2-7B, 13B
 - Llama3-8B
-- Mistral-7B
+- Mistral-7B  
 - GPT-3-175B
+- LargeModel-100B (for testing large-scale parallelism)
 
 ## Development
 
@@ -188,10 +294,14 @@ Contributions are welcome! Please:
 ## Future Enhancements
 
 - Additional framework implementations (TensorRT-LLM, SGLang, Dynama)
-- Advanced network topology modeling
+- Advanced collective communication algorithms (NCCL-accurate modeling)
+- Heterogeneous hardware support (mixed GPU types)
+- Dynamic parallelism adaptation
 - Energy consumption modeling
 - Multi-node distributed serving simulation
 - Integration with real workload traces
+- Pipeline bubble optimization strategies
+- Expert parallelism for MoE models
 
 ## License
 

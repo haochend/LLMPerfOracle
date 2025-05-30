@@ -10,6 +10,7 @@ import yaml
 
 from ..core import SimulationEnvironment
 from ..frameworks import AbstractLLMFramework, VLLMFramework
+from ..frameworks.parallel_vllm_framework import ParallelVLLMFramework
 from ..hardware import HardwareResourceProfile, VirtualHardwarePlatform
 from ..metrics import MetricsCollector
 from ..workload import WorkloadGenerator
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 # Framework class mapping
 FRAMEWORK_CLASS_MAP = {
     "VLLM": VLLMFramework,
+    "ParallelVLLM": ParallelVLLMFramework,
     # Add more framework mappings here as they are implemented
     # "TRTLLM": TRTLLMFramework,
     # "SGLang": SGLangFramework,

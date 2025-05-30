@@ -47,6 +47,12 @@ class VLLMFramework(AbstractLLMFramework):
         self.max_running_sequences = self.config.get("max_num_seqs", 256)
         self.max_batched_tokens_per_iteration = self.config.get("max_num_batched_tokens", 4096)
         
+        # For TP, use primary GPU for scheduling but distribute computation
+        if self.parallelism_strategy in ['TP', 'TP_PP']:
+            self.primary_gpu_id = self.gpu_ids[0]
+        else:
+            self.primary_gpu_id = self.gpu_id
+        
         # PagedAttention KV cache management
         self._init_kv_cache()
         
@@ -57,21 +63,32 @@ class VLLMFramework(AbstractLLMFramework):
         
         logger.info(
             f"vLLM {framework_id} initialized: "
-            f"GPU={self.gpu_id}, block_size={self.block_size}, "
+            f"GPUs={self.gpu_ids if self.parallelism_strategy != 'None' else [self.gpu_id]}, "
+            f"parallelism={self.parallelism_strategy}, "
+            f"block_size={self.block_size}, "
             f"max_seqs={self.max_running_sequences}"
         )
     
     def _init_kv_cache(self) -> None:
         """Initialize PagedAttention KV cache structures."""
         # Calculate total KV cache blocks available
-        device_info = self.virtual_hardware.get_device_info(self.gpu_id)
-        if not device_info:
-            raise ValueError(f"GPU {self.gpu_id} not found in virtual hardware")
+        # For TP, KV cache is distributed across GPUs
+        if self.parallelism_strategy in ['TP', 'TP_PP']:
+            # Each GPU in TP group holds 1/tp_degree of the KV cache
+            total_memory = 0
+            for gpu_id in self.tp_gpu_groups[0]:  # First TP group for now
+                device_info = self.virtual_hardware.get_device_info(gpu_id)
+                if not device_info:
+                    raise ValueError(f"GPU {gpu_id} not found in virtual hardware")
+                total_memory += device_info.memory_capacity_bytes
+            gpu_memory_for_kv = total_memory * 0.9
+        else:
+            device_info = self.virtual_hardware.get_device_info(self.gpu_id)
+            if not device_info:
+                raise ValueError(f"GPU {self.gpu_id} not found in virtual hardware")
+            gpu_memory_for_kv = device_info.memory_capacity_bytes * 0.9
         
-        # Estimate GPU memory available for KV cache (assume 90% after model weights)
-        gpu_memory_for_kv = device_info.memory_capacity_bytes * 0.9
         bytes_per_block = self._bytes_per_kv_block()
-        
         self.num_gpu_blocks = int(gpu_memory_for_kv / bytes_per_block)
         
         # SimPy container to track free blocks
@@ -213,21 +230,27 @@ class VLLMFramework(AbstractLLMFramework):
         prefill_processes = []
         
         for seq_state in prefill_batch:
-            # Estimate prefill operations
-            task_desc = self._estimate_prefill_ops(
-                seq_state.request.prompt_num_tokens,
-                batch_size=1  # Individual prefills
-            )
-            task_desc["task_id"] = f"{seq_state.request.request_id}_prefill"
-            
             # Log prefill start
             self.metrics_collector.log_prefill_start(
                 seq_state.request.request_id, self.simpy_env.now
             )
             seq_state.prefill_start_time = self.simpy_env.now
             
-            # Submit to hardware
-            prefill_proc = self.virtual_hardware.submit_computation_task(self.gpu_id, task_desc)
+            if self.parallelism_strategy in ['TP', 'TP_PP']:
+                # Execute prefill with tensor parallelism
+                prefill_proc = self._execute_tp_prefill(
+                    seq_state.request.prompt_num_tokens,
+                    seq_state.request.request_id
+                )
+            else:
+                # Regular single-GPU prefill
+                task_desc = self._estimate_prefill_ops(
+                    seq_state.request.prompt_num_tokens,
+                    batch_size=1
+                )
+                task_desc["task_id"] = f"{seq_state.request.request_id}_prefill"
+                prefill_proc = self.virtual_hardware.submit_computation_task(self.gpu_id, task_desc)
+            
             prefill_processes.append(prefill_proc)
         
         # Wait for all prefills to complete
@@ -244,12 +267,14 @@ class VLLMFramework(AbstractLLMFramework):
         if not decode_batch:
             return
         
-        # Estimate decode operations for the entire batch
-        task_desc = self._estimate_decode_op(batch_size=len(decode_batch))
-        task_desc["task_id"] = f"decode_batch_{self.simpy_env.now}"
-        
-        # Submit to hardware
-        yield self.virtual_hardware.submit_computation_task(self.gpu_id, task_desc)
+        if self.parallelism_strategy in ['TP', 'TP_PP']:
+            # Execute decode with tensor parallelism
+            yield from self._execute_tp_decode(len(decode_batch))
+        else:
+            # Regular single-GPU decode
+            task_desc = self._estimate_decode_op(batch_size=len(decode_batch))
+            task_desc["task_id"] = f"decode_batch_{self.simpy_env.now}"
+            yield self.virtual_hardware.submit_computation_task(self.gpu_id, task_desc)
         
         current_time = self.simpy_env.now
         completed_sequences = []
@@ -349,3 +374,170 @@ class VLLMFramework(AbstractLLMFramework):
             "kv_blocks_used": self.num_gpu_blocks - self.gpu_blocks_container.level,
             "kv_blocks_total": self.num_gpu_blocks,
         }
+    
+    def _execute_tp_prefill(self, num_tokens: int, request_id: str) -> simpy.Process:
+        """Execute prefill with tensor parallelism."""
+        def _tp_prefill():
+            # Get the current TP GPU group (for now, just use the first one)
+            tp_gpu_group = self.tp_gpu_groups[0]
+            
+            # Process each layer
+            num_layers = self.model_profile.get('num_layers', 32)
+            for layer_idx in range(num_layers):
+                # Alternate between attention and MLP layers
+                if layer_idx % 2 == 0:
+                    layer_type = 'attention'
+                else:
+                    layer_type = 'mlp'
+                
+                layer_stats = self._get_layer_stats(layer_type)
+                if not layer_stats:
+                    # Fallback to regular prefill stats
+                    layer_stats = {
+                        'flops_per_token_prefill': self.model_profile['prefill_op_stats']['flops_per_token'] / num_layers,
+                        'memory_bytes_per_token_prefill': self.model_profile['prefill_op_stats']['memory_bytes_per_token'] / num_layers,
+                        'tp_collective_type': 'AllReduce'
+                    }
+                
+                # Dispatch TP sharded operation
+                yield from self._dispatch_tp_shardable_operation(
+                    layer_stats,
+                    batch_size=1,
+                    sequence_length=num_tokens,
+                    op_type=f'{layer_type}_prefill',
+                    tp_collective_type=layer_stats.get('tp_collective_type', 'AllReduce'),
+                    tp_gpu_group=tp_gpu_group,
+                    request_id=f"{request_id}_layer_{layer_idx}"
+                )
+        
+        return self.simpy_env.process(_tp_prefill())
+    
+    def _execute_tp_decode(self, batch_size: int) -> simpy.events.Event:
+        """Execute decode with tensor parallelism."""
+        # Get the current TP GPU group
+        tp_gpu_group = self.tp_gpu_groups[0]
+        
+        # Process each layer
+        num_layers = self.model_profile.get('num_layers', 32)
+        for layer_idx in range(num_layers):
+            # Alternate between attention and MLP layers
+            if layer_idx % 2 == 0:
+                layer_type = 'attention'
+            else:
+                layer_type = 'mlp'
+            
+            layer_stats = self._get_layer_stats(layer_type)
+            if not layer_stats:
+                # Fallback to regular decode stats
+                layer_stats = {
+                    'flops_per_token_decode': self.model_profile['decode_op_stats']['flops_per_token'] / num_layers,
+                    'memory_bytes_per_token_decode': self.model_profile['decode_op_stats']['memory_bytes_per_token'] / num_layers,
+                    'tp_collective_type': 'AllReduce'
+                }
+            
+            # Dispatch TP sharded operation
+            yield from self._dispatch_tp_shardable_operation(
+                layer_stats,
+                batch_size=batch_size,
+                sequence_length=1,  # Decode processes one token at a time
+                op_type=f'{layer_type}_decode',
+                tp_collective_type=layer_stats.get('tp_collective_type', 'AllReduce'),
+                tp_gpu_group=tp_gpu_group,
+                request_id=f"decode_batch_{self.simpy_env.now}_layer_{layer_idx}"
+            )
+    
+    def _dispatch_tp_shardable_operation(
+        self,
+        base_op_stats: Dict[str, Any],
+        batch_size: int,
+        sequence_length: int,
+        op_type: str,
+        tp_collective_type: str,
+        tp_gpu_group: List[str],
+        request_id: str
+    ) -> simpy.events.Event:
+        """Dispatch a tensor-parallel shardable operation."""
+        tp_degree = len(tp_gpu_group)
+        
+        # Calculate sharded compute for each GPU
+        if 'prefill' in op_type:
+            base_flops = base_op_stats.get('flops_per_token_prefill', 1e9)
+            base_memory = base_op_stats.get('memory_bytes_per_token_prefill', 1e6)
+        else:
+            base_flops = base_op_stats.get('flops_per_token_decode', 1e9)
+            base_memory = base_op_stats.get('memory_bytes_per_token_decode', 1e6)
+        
+        sharded_flops = base_flops / tp_degree
+        sharded_memory = base_memory / tp_degree
+        
+        # Create task description for each GPU
+        task_description = {
+            'flops_required_fp16': sharded_flops * sequence_length * batch_size,
+            'memory_read_bytes': sharded_memory * sequence_length * batch_size,
+            'memory_write_bytes': sharded_memory * sequence_length * batch_size / 2,
+            'is_memory_bound_hint': 'decode' in op_type,
+        }
+        
+        # Submit parallel compute tasks
+        compute_events = []
+        for i, gpu_id in enumerate(tp_gpu_group):
+            task_desc = task_description.copy()
+            task_desc['task_id'] = f"{request_id}_tp{i}"
+            compute_event = self.virtual_hardware.submit_computation_task(gpu_id, task_desc)
+            compute_events.append(compute_event)
+        
+        # Wait for all shards to compute
+        yield simpy.AllOf(self.simpy_env, compute_events)
+        
+        # Simulate collective communication
+        if tp_degree > 1:
+            yield from self._simulate_tp_collective(
+                tp_collective_type,
+                tp_gpu_group,
+                batch_size,
+                sequence_length,
+                op_type
+            )
+    
+    def _simulate_tp_collective(
+        self,
+        collective_type: str,
+        gpu_group: List[str],
+        batch_size: int,
+        sequence_length: int,
+        op_type: str
+    ) -> simpy.events.Event:
+        """Simulate tensor parallel collective communication."""
+        # Estimate data size for collective
+        hidden_size = self.model_profile.get('hidden_size', 4096)
+        bytes_per_element = 2  # FP16
+        
+        # For attention/MLP output, we need to all-reduce activations
+        activation_size = batch_size * sequence_length * hidden_size * bytes_per_element
+        
+        # Simplified ring collective simulation
+        num_gpus = len(gpu_group)
+        if num_gpus <= 1:
+            return
+        
+        # For ring allreduce, each GPU sends/receives data in a ring pattern
+        # Simplified: just simulate point-to-point transfers in a ring
+        collective_events = []
+        
+        for i in range(num_gpus):
+            source_gpu = gpu_group[i]
+            dest_gpu = gpu_group[(i + 1) % num_gpus]
+            
+            # Each step transfers 1/N of the data
+            transfer_size = activation_size / num_gpus
+            
+            transfer_event = self.virtual_hardware.submit_network_transfer_task(
+                source_gpu,
+                dest_gpu,
+                transfer_size
+            )
+            collective_events.append(transfer_event)
+        
+        # In a real ring allreduce, these would be pipelined
+        # For simplicity, we wait for all transfers
+        yield simpy.AllOf(self.simpy_env, collective_events)

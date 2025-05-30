@@ -1,0 +1,112 @@
+# Quick test configuration for parallel experiments
+simulation:
+  max_simulation_time: 10  # Short simulation for testing
+  random_seed: 42
+
+model_characteristics_db_path: "configs/model_params.json"
+
+hardware_profile:
+  compute_devices:
+    - device_id: "gpu0"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000
+      memory_gbps: 2039
+      processing_units: 108
+    - device_id: "gpu1"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000
+      memory_gbps: 2039
+      processing_units: 108
+    - device_id: "gpu2"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000
+      memory_gbps: 2039
+      processing_units: 108
+    - device_id: "gpu3"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000
+      memory_gbps: 2039
+      processing_units: 108
+      
+  network_links:
+    # Inter-GPU links for TP/PP communication
+    - link_id: "gpu0_to_gpu1"
+      source_id: "gpu0"
+      dest_id: "gpu1"
+      bandwidth_bps: 600_000_000_000  # 600 Gbps NVLink
+      latency_s: 0.0000005  # 0.5 microseconds
+      bidirectional: true
+    - link_id: "gpu1_to_gpu2"
+      source_id: "gpu1"
+      dest_id: "gpu2"
+      bandwidth_bps: 600_000_000_000
+      latency_s: 0.0000005
+      bidirectional: true
+    - link_id: "gpu2_to_gpu3"
+      source_id: "gpu2"
+      dest_id: "gpu3"
+      bandwidth_bps: 600_000_000_000
+      latency_s: 0.0000005
+      bidirectional: true
+    # Client to framework links
+    - link_id: "client_to_server"
+      source_id: "client_node_0"
+      dest_id: "framework_entry_0"
+      bandwidth_bps: 10_000_000_000  # 10 Gbps
+      latency_s: 0.0001  # 100 microseconds
+      bidirectional: true
+
+workload:
+  total_duration: 10
+  bytes_per_token_estimate_for_network: 2
+  load_balancing_strategy: "round_robin"  # For data parallelism
+  client_profiles:
+    - profile_name: "simple_requests"
+      weight: 1.0
+      inter_arrival_time_dist_config:
+        type: "Constant"
+        value: 2.0  # One request every 2 seconds
+      prompt_tokens_dist_config:
+        type: "Constant"
+        value: 128
+      max_output_tokens_dist_config:
+        type: "Constant"
+        value: 64
+      conversational_probability: 0.0
+      streaming_response_probability: 0.0
+
+frameworks_to_test:
+  # Test Tensor Parallelism
+  - name: "vllm_tp4"
+    type: "VLLM"
+    is_target_for_workload: true
+    config:
+      model_profile_id: "Llama2-7B"
+      gpu_id: "gpu0"  # Primary GPU
+      block_size: 16
+      max_num_seqs: 32
+      max_num_batched_tokens: 1024
+      scheduler_iteration_delay_s: 0.0001
+      bytes_per_token_estimate_for_network: 2
+      parallelism:
+        strategy: "TP"
+        tp_degree: 4
+        gpu_ids: ["gpu0", "gpu1", "gpu2", "gpu3"]
+
+metrics_config:
+  percentiles_to_calculate: [0.5, 0.9, 0.99]
+  warm_up_duration_s: 2
+  output_requests_csv_path: "experiments/results/test_parallel_quick.csv"
+  output_summary_json_path: "experiments/results/test_parallel_quick_summary.json"

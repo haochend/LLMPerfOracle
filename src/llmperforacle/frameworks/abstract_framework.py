@@ -2,7 +2,7 @@
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import simpy
 
@@ -44,6 +44,10 @@ class AbstractLLMFramework(ABC):
         
         # Common request queue for incoming requests
         self.request_arrival_queue = simpy.Store(simpy_env)
+        
+        # Parse parallelism configuration
+        self.parallelism_config = self.config.get('parallelism', {})
+        self._parse_parallelism_config()
         
         logger.info(f"Initialized {self.__class__.__name__} framework: {framework_id}")
     
@@ -145,3 +149,138 @@ class AbstractLLMFramework(ABC):
         num_layers = self.model_profile.get("num_layers", 32)
         
         return num_tokens * bytes_per_token_per_layer * num_layers
+    
+    def _parse_parallelism_config(self):
+        """Parse and validate parallelism configuration."""
+        # Default: single GPU, no parallelism
+        if not self.parallelism_config:
+            # Try to get gpu_id from top-level config for backward compatibility
+            gpu_id = self.config.get('gpu_id', 'gpu0')
+            self.parallelism_config = {
+                'strategy': 'None',
+                'gpu_ids': [gpu_id]
+            }
+        
+        self.parallelism_strategy = self.parallelism_config.get('strategy', 'None')
+        self.gpu_ids = self.parallelism_config.get('gpu_ids', [])
+        
+        # Tensor Parallelism configuration
+        self.tp_degree = self.parallelism_config.get('tp_degree', 1)
+        
+        # Pipeline Parallelism configuration
+        self.pp_stages = self.parallelism_config.get('pp_stages', 1)
+        self.num_microbatches = self.parallelism_config.get('num_microbatches_per_request', 1)
+        
+        # Validate configuration
+        if self.parallelism_strategy == 'TP':
+            if len(self.gpu_ids) != self.tp_degree:
+                raise ValueError(f"TP requires {self.tp_degree} GPUs but got {len(self.gpu_ids)}")
+        elif self.parallelism_strategy == 'PP':
+            if len(self.gpu_ids) % self.pp_stages != 0:
+                raise ValueError(f"PP with {self.pp_stages} stages requires GPU count divisible by {self.pp_stages}")
+        elif self.parallelism_strategy == 'TP_PP':
+            expected_gpus = self.tp_degree * self.pp_stages
+            if len(self.gpu_ids) != expected_gpus:
+                raise ValueError(f"TP_PP requires {expected_gpus} GPUs (tp={self.tp_degree} * pp={self.pp_stages}) but got {len(self.gpu_ids)}")
+        
+        # Set up GPU mappings
+        self._setup_gpu_mappings()
+        
+        logger.info(f"Parallelism config: strategy={self.parallelism_strategy}, tp_degree={self.tp_degree}, pp_stages={self.pp_stages}, gpus={self.gpu_ids}")
+    
+    def _setup_gpu_mappings(self):
+        """Set up GPU mappings for different parallelism strategies."""
+        if self.parallelism_strategy == 'None':
+            self.primary_gpu_id = self.gpu_ids[0] if self.gpu_ids else 'gpu0'
+            self.tp_gpu_groups = [[self.primary_gpu_id]]
+            self.pp_stage_to_gpus = {0: [self.primary_gpu_id]}
+            
+        elif self.parallelism_strategy == 'TP':
+            self.tp_gpu_groups = [self.gpu_ids]
+            self.pp_stage_to_gpus = {0: self.gpu_ids}
+            
+        elif self.parallelism_strategy == 'PP':
+            gpus_per_stage = len(self.gpu_ids) // self.pp_stages
+            self.pp_stage_to_gpus = {}
+            for stage in range(self.pp_stages):
+                start_idx = stage * gpus_per_stage
+                end_idx = start_idx + gpus_per_stage
+                self.pp_stage_to_gpus[stage] = self.gpu_ids[start_idx:end_idx]
+            self.tp_gpu_groups = list(self.pp_stage_to_gpus.values())
+            
+        elif self.parallelism_strategy == 'TP_PP':
+            # GPUs are arranged as pp_stages x tp_degree
+            self.pp_stage_to_gpus = {}
+            self.tp_gpu_groups = []
+            for stage in range(self.pp_stages):
+                start_idx = stage * self.tp_degree
+                end_idx = start_idx + self.tp_degree
+                stage_gpus = self.gpu_ids[start_idx:end_idx]
+                self.pp_stage_to_gpus[stage] = stage_gpus
+                self.tp_gpu_groups.append(stage_gpus)
+        
+        # Calculate layer distribution for PP
+        if self.pp_stages > 1:
+            num_layers = self.model_profile.get('num_layers', 32)
+            layers_per_stage = num_layers // self.pp_stages
+            self.stage_layer_ranges = {}
+            for stage in range(self.pp_stages):
+                start_layer = stage * layers_per_stage
+                end_layer = start_layer + layers_per_stage - 1
+                if stage == self.pp_stages - 1:  # Last stage gets remaining layers
+                    end_layer = num_layers - 1
+                self.stage_layer_ranges[stage] = (start_layer, end_layer)
+        else:
+            self.stage_layer_ranges = {0: (0, self.model_profile.get('num_layers', 32) - 1)}
+    
+    def _get_layer_stats(self, layer_type: str) -> Dict[str, Any]:
+        """Get computational stats for a specific layer type.
+        
+        Args:
+            layer_type: Type of layer ('attention' or 'mlp')
+            
+        Returns:
+            Dictionary with layer statistics
+        """
+        layer_types = self.model_profile.get('layer_types', {})
+        return layer_types.get(layer_type, {})
+    
+    def _estimate_collective_time(self, data_size_bytes: int, collective_type: str, gpu_group: List[str]) -> float:
+        """Estimate time for collective communication operation.
+        
+        Args:
+            data_size_bytes: Size of data to communicate
+            collective_type: Type of collective ('AllReduce', 'AllGather', etc.)
+            gpu_group: List of GPU IDs participating in the collective
+            
+        Returns:
+            Estimated time in seconds
+        """
+        # Simplified model: assume ring allreduce
+        # Time = 2 * (N-1) / N * data_size / bandwidth
+        num_gpus = len(gpu_group)
+        if num_gpus <= 1:
+            return 0.0
+        
+        # Find slowest link bandwidth in the group (simplified)
+        # In reality, would need to analyze the actual topology
+        min_bandwidth = float('inf')
+        for i in range(num_gpus):
+            for j in range(i + 1, num_gpus):
+                # This is a simplification - actual implementation would check real links
+                min_bandwidth = min(min_bandwidth, 600e9)  # Assume NVLink bandwidth
+        
+        if collective_type == 'AllReduce':
+            # Ring allreduce: 2*(N-1)/N * data_size / bandwidth
+            collective_factor = 2 * (num_gpus - 1) / num_gpus
+        elif collective_type == 'AllGather':
+            # All-gather: (N-1)/N * data_size / bandwidth
+            collective_factor = (num_gpus - 1) / num_gpus
+        elif collective_type == 'ReduceScatter':
+            # Reduce-scatter: (N-1)/N * data_size / bandwidth
+            collective_factor = (num_gpus - 1) / num_gpus
+        else:
+            collective_factor = 1.0
+        
+        bandwidth_bytes_per_sec = min_bandwidth / 8  # Convert bits to bytes
+        return collective_factor * data_size_bytes / bandwidth_bytes_per_sec

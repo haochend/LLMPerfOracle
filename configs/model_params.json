@@ -4,6 +4,9 @@
     "hidden_size": 4096,
     "num_layers": 32,
     "num_attention_heads": 32,
+    "num_kv_heads": 32,
+    "intermediate_size": 11008,
+    "vocab_size": 32000,
     "prefill_op_stats": {
       "flops_per_token": 14000000000,
       "memory_bytes_per_token": 28000000
@@ -12,13 +15,38 @@
       "flops_per_token": 14000000000,
       "memory_bytes_per_token": 56000000
     },
-    "kv_cache_bytes_per_token_per_layer": 16384
+    "kv_cache_bytes_per_token_per_layer": 16384,
+    "layer_types": {
+      "attention": {
+        "flops_per_token_prefill": 437500000,
+        "flops_per_token_decode": 437500000,
+        "memory_bytes_per_token_prefill": 875000,
+        "memory_bytes_per_token_decode": 1750000,
+        "activation_output_bytes_per_token": 8192,
+        "is_tp_shardable_qkv": true,
+        "is_tp_shardable_output_proj": true,
+        "tp_collective_type": "AllReduce"
+      },
+      "mlp": {
+        "flops_per_token_prefill": 437500000,
+        "flops_per_token_decode": 437500000,
+        "memory_bytes_per_token_prefill": 875000,
+        "memory_bytes_per_token_decode": 1750000,
+        "activation_output_bytes_per_token": 8192,
+        "is_tp_shardable_gate_up": true,
+        "is_tp_shardable_down_proj": true,
+        "tp_collective_type": "AllReduce"
+      }
+    }
   },
   "Llama2-13B": {
     "parameters": 13000000000,
     "hidden_size": 5120,
     "num_layers": 40,
     "num_attention_heads": 40,
+    "num_kv_heads": 40,
+    "intermediate_size": 13824,
+    "vocab_size": 32000,
     "prefill_op_stats": {
       "flops_per_token": 26000000000,
       "memory_bytes_per_token": 52000000
@@ -27,13 +55,38 @@
       "flops_per_token": 26000000000,
       "memory_bytes_per_token": 104000000
     },
-    "kv_cache_bytes_per_token_per_layer": 20480
+    "kv_cache_bytes_per_token_per_layer": 20480,
+    "layer_types": {
+      "attention": {
+        "flops_per_token_prefill": 650000000,
+        "flops_per_token_decode": 650000000,
+        "memory_bytes_per_token_prefill": 1300000,
+        "memory_bytes_per_token_decode": 2600000,
+        "activation_output_bytes_per_token": 10240,
+        "is_tp_shardable_qkv": true,
+        "is_tp_shardable_output_proj": true,
+        "tp_collective_type": "AllReduce"
+      },
+      "mlp": {
+        "flops_per_token_prefill": 650000000,
+        "flops_per_token_decode": 650000000,
+        "memory_bytes_per_token_prefill": 1300000,
+        "memory_bytes_per_token_decode": 2600000,
+        "activation_output_bytes_per_token": 10240,
+        "is_tp_shardable_gate_up": true,
+        "is_tp_shardable_down_proj": true,
+        "tp_collective_type": "AllReduce"
+      }
+    }
   },
   "Llama3-8B": {
     "parameters": 8000000000,
     "hidden_size": 4096,
     "num_layers": 32,
     "num_attention_heads": 32,
+    "num_kv_heads": 8,
+    "intermediate_size": 14336,
+    "vocab_size": 128256,
     "prefill_op_stats": {
       "flops_per_token": 16000000000,
       "memory_bytes_per_token": 32000000
@@ -42,13 +95,38 @@
       "flops_per_token": 16000000000,
       "memory_bytes_per_token": 64000000
     },
-    "kv_cache_bytes_per_token_per_layer": 16384
+    "kv_cache_bytes_per_token_per_layer": 16384,
+    "layer_types": {
+      "attention": {
+        "flops_per_token_prefill": 500000000,
+        "flops_per_token_decode": 500000000,
+        "memory_bytes_per_token_prefill": 1000000,
+        "memory_bytes_per_token_decode": 2000000,
+        "activation_output_bytes_per_token": 8192,
+        "is_tp_shardable_qkv": true,
+        "is_tp_shardable_output_proj": true,
+        "tp_collective_type": "AllReduce"
+      },
+      "mlp": {
+        "flops_per_token_prefill": 500000000,
+        "flops_per_token_decode": 500000000,
+        "memory_bytes_per_token_prefill": 1000000,
+        "memory_bytes_per_token_decode": 2000000,
+        "activation_output_bytes_per_token": 8192,
+        "is_tp_shardable_gate_up": true,
+        "is_tp_shardable_down_proj": true,
+        "tp_collective_type": "AllReduce"
+      }
+    }
   },
   "Mistral-7B": {
     "parameters": 7000000000,
     "hidden_size": 4096,
     "num_layers": 32,
     "num_attention_heads": 32,
+    "num_kv_heads": 8,
+    "intermediate_size": 14336,
+    "vocab_size": 32000,
     "prefill_op_stats": {
       "flops_per_token": 14000000000,
       "memory_bytes_per_token": 28000000
@@ -57,13 +135,38 @@
       "flops_per_token": 14000000000,
       "memory_bytes_per_token": 56000000
     },
-    "kv_cache_bytes_per_token_per_layer": 16384
+    "kv_cache_bytes_per_token_per_layer": 16384,
+    "layer_types": {
+      "attention": {
+        "flops_per_token_prefill": 437500000,
+        "flops_per_token_decode": 437500000,
+        "memory_bytes_per_token_prefill": 875000,
+        "memory_bytes_per_token_decode": 1750000,
+        "activation_output_bytes_per_token": 8192,
+        "is_tp_shardable_qkv": true,
+        "is_tp_shardable_output_proj": true,
+        "tp_collective_type": "AllReduce"
+      },
+      "mlp": {
+        "flops_per_token_prefill": 437500000,
+        "flops_per_token_decode": 437500000,
+        "memory_bytes_per_token_prefill": 875000,
+        "memory_bytes_per_token_decode": 1750000,
+        "activation_output_bytes_per_token": 8192,
+        "is_tp_shardable_gate_up": true,
+        "is_tp_shardable_down_proj": true,
+        "tp_collective_type": "AllReduce"
+      }
+    }
   },
   "GPT-3-175B": {
     "parameters": 175000000000,
     "hidden_size": 12288,
     "num_layers": 96,
     "num_attention_heads": 96,
+    "num_kv_heads": 96,
+    "intermediate_size": 49152,
+    "vocab_size": 50257,
     "prefill_op_stats": {
       "flops_per_token": 350000000000,
       "memory_bytes_per_token": 700000000
@@ -72,6 +175,68 @@
       "flops_per_token": 350000000000,
       "memory_bytes_per_token": 1400000000
     },
-    "kv_cache_bytes_per_token_per_layer": 49152
+    "kv_cache_bytes_per_token_per_layer": 49152,
+    "layer_types": {
+      "attention": {
+        "flops_per_token_prefill": 3645833333,
+        "flops_per_token_decode": 3645833333,
+        "memory_bytes_per_token_prefill": 7291667,
+        "memory_bytes_per_token_decode": 14583333,
+        "activation_output_bytes_per_token": 24576,
+        "is_tp_shardable_qkv": true,
+        "is_tp_shardable_output_proj": true,
+        "tp_collective_type": "AllReduce"
+      },
+      "mlp": {
+        "flops_per_token_prefill": 3645833333,
+        "flops_per_token_decode": 3645833333,
+        "memory_bytes_per_token_prefill": 7291667,
+        "memory_bytes_per_token_decode": 14583333,
+        "activation_output_bytes_per_token": 24576,
+        "is_tp_shardable_gate_up": true,
+        "is_tp_shardable_down_proj": true,
+        "tp_collective_type": "AllReduce"
+      }
+    }
+  },
+  "LargeModel-100B": {
+    "parameters": 100000000000,
+    "hidden_size": 8192,
+    "num_layers": 80,
+    "num_attention_heads": 64,
+    "num_kv_heads": 8,
+    "intermediate_size": 28672,
+    "vocab_size": 32000,
+    "prefill_op_stats": {
+      "flops_per_token": 200000000000,
+      "memory_bytes_per_token": 400000000
+    },
+    "decode_op_stats": {
+      "flops_per_token": 200000000000,
+      "memory_bytes_per_token": 800000000
+    },
+    "kv_cache_bytes_per_token_per_layer": 32768,
+    "layer_types": {
+      "attention": {
+        "flops_per_token_prefill": 2500000000,
+        "flops_per_token_decode": 2500000000,
+        "memory_bytes_per_token_prefill": 5000000,
+        "memory_bytes_per_token_decode": 10000000,
+        "activation_output_bytes_per_token": 16384,
+        "is_tp_shardable_qkv": true,
+        "is_tp_shardable_output_proj": true,
+        "tp_collective_type": "AllReduce"
+      },
+      "mlp": {
+        "flops_per_token_prefill": 2500000000,
+        "flops_per_token_decode": 2500000000,
+        "memory_bytes_per_token_prefill": 5000000,
+        "memory_bytes_per_token_decode": 10000000,
+        "activation_output_bytes_per_token": 16384,
+        "is_tp_shardable_gate_up": true,
+        "is_tp_shardable_down_proj": true,
+        "tp_collective_type": "AllReduce"
+      }
+    }
   }
 }

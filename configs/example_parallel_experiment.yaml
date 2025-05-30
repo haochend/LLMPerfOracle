@@ -1,0 +1,297 @@
+# Example experiment configuration for LLMPerfOracle with Multi-GPU Parallelism
+# This configuration demonstrates various parallelism strategies (TP, PP, DP, TP+PP)
+
+simulation:
+  max_simulation_time: 600  # 10 minutes
+  random_seed: 42
+
+# Path to model characteristics database
+model_characteristics_db_path: "./configs/model_params.json"
+
+# Virtual hardware configuration for multi-GPU setup
+hardware_profile:
+  compute_devices:
+    # 8 GPUs for parallel processing
+    - device_id: "gpu0"
+      device_type: "GPU"
+      # A100 80GB profile
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000  # 80 GB
+      memory_gbps: 2039  # GB/s
+      processing_units: 108  # SMs
+    - device_id: "gpu1"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000
+      memory_gbps: 2039
+      processing_units: 108
+    - device_id: "gpu2"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000
+      memory_gbps: 2039
+      processing_units: 108
+    - device_id: "gpu3"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000
+      memory_gbps: 2039
+      processing_units: 108
+    - device_id: "gpu4"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000
+      memory_gbps: 2039
+      processing_units: 108
+    - device_id: "gpu5"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000
+      memory_gbps: 2039
+      processing_units: 108
+    - device_id: "gpu6"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000
+      memory_gbps: 2039
+      processing_units: 108
+    - device_id: "gpu7"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000
+      memory_gbps: 2039
+      processing_units: 108
+      
+  network_links:
+    # Client to framework links
+    - link_id: "client_to_server"
+      source_id: "client_node_0"
+      dest_id: "framework_entry_0"
+      bandwidth_bps: 10_000_000_000  # 10 Gbps
+      latency_s: 0.0001  # 100 microseconds
+      bidirectional: true
+    # Inter-GPU links (NVLink/InfiniBand)
+    - link_id: "gpu0_to_gpu1"
+      source_id: "gpu0"
+      dest_id: "gpu1"
+      bandwidth_bps: 600_000_000_000  # 600 GB/s (NVLink)
+      latency_s: 0.000001  # 1 microsecond
+      bidirectional: true
+    - link_id: "gpu1_to_gpu2"
+      source_id: "gpu1"
+      dest_id: "gpu2"
+      bandwidth_bps: 600_000_000_000
+      latency_s: 0.000001
+      bidirectional: true
+    - link_id: "gpu2_to_gpu3"
+      source_id: "gpu2"
+      dest_id: "gpu3"
+      bandwidth_bps: 600_000_000_000
+      latency_s: 0.000001
+      bidirectional: true
+    - link_id: "gpu3_to_gpu0"
+      source_id: "gpu3"
+      dest_id: "gpu0"
+      bandwidth_bps: 600_000_000_000
+      latency_s: 0.000001
+      bidirectional: true
+    - link_id: "gpu4_to_gpu5"
+      source_id: "gpu4"
+      dest_id: "gpu5"
+      bandwidth_bps: 600_000_000_000
+      latency_s: 0.000001
+      bidirectional: true
+    - link_id: "gpu5_to_gpu6"
+      source_id: "gpu5"
+      dest_id: "gpu6"
+      bandwidth_bps: 600_000_000_000
+      latency_s: 0.000001
+      bidirectional: true
+    - link_id: "gpu6_to_gpu7"
+      source_id: "gpu6"
+      dest_id: "gpu7"
+      bandwidth_bps: 600_000_000_000
+      latency_s: 0.000001
+      bidirectional: true
+    - link_id: "gpu7_to_gpu4"
+      source_id: "gpu7"
+      dest_id: "gpu4"
+      bandwidth_bps: 600_000_000_000
+      latency_s: 0.000001
+      bidirectional: true
+    # Cross-group links (PCIe/InfiniBand)
+    - link_id: "gpu0_to_gpu4"
+      source_id: "gpu0"
+      dest_id: "gpu4"
+      bandwidth_bps: 200_000_000_000  # 200 GB/s (InfiniBand)
+      latency_s: 0.000005  # 5 microseconds
+      bidirectional: true
+    - link_id: "gpu1_to_gpu5"
+      source_id: "gpu1"
+      dest_id: "gpu5"
+      bandwidth_bps: 200_000_000_000
+      latency_s: 0.000005
+      bidirectional: true
+    - link_id: "gpu2_to_gpu6"
+      source_id: "gpu2"
+      dest_id: "gpu6"
+      bandwidth_bps: 200_000_000_000
+      latency_s: 0.000005
+      bidirectional: true
+    - link_id: "gpu3_to_gpu7"
+      source_id: "gpu3"
+      dest_id: "gpu7"
+      bandwidth_bps: 200_000_000_000
+      latency_s: 0.000005
+      bidirectional: true
+
+# Workload configuration
+workload:
+  total_duration: 600
+  bytes_per_token_estimate_for_network: 2
+  random_seed: 123
+  max_turns_per_session: 5
+  
+  client_profiles:
+    # Interactive chatbot users
+    - profile_name: "interactive_chat"
+      weight: 0.7
+      inter_arrival_time_dist_config:
+        type: "Exponential"
+        rate: 10.0  # 10 requests per second average
+      prompt_tokens_dist_config:
+        type: "LogNormal"
+        mean: 128
+        sigma: 64
+        is_int: true
+      max_output_tokens_dist_config:
+        type: "LogNormal"
+        mean: 256
+        sigma: 128
+        is_int: true
+      conversational_probability: 0.6
+      streaming_response_probability: 0.95
+      follow_up_inter_arrival_time_dist_config:
+        type: "Exponential"
+        rate: 0.2  # 5 seconds average between turns
+        
+    # Batch processing users
+    - profile_name: "batch_processing"
+      weight: 0.3
+      inter_arrival_time_dist_config:
+        type: "Exponential"
+        rate: 4.0  # 4 requests per second
+      prompt_tokens_dist_config:
+        type: "Uniform"
+        low: 500
+        high: 1000
+        is_int: true
+      max_output_tokens_dist_config:
+        type: "Constant"
+        value: 512
+        is_int: true
+      conversational_probability: 0.0
+      streaming_response_probability: 0.0
+
+# LLM serving frameworks to test
+frameworks_to_test:
+  # Example 1: Tensor Parallelism only (4-way TP)
+  - name: "vllm_tp4_llama2_13b"
+    type: "ParallelVLLM"
+    is_target_for_workload: true
+    config:
+      model_profile_id: "Llama2-13B"
+      block_size: 16
+      max_num_seqs: 256
+      max_num_batched_tokens: 8192
+      scheduler_iteration_delay_s: 0.0001
+      bytes_per_token_estimate_for_network: 2
+      parallelism:
+        strategy: "TP"  # Tensor Parallelism only
+        tp_degree: 4    # 4-way tensor parallelism
+        gpu_ids: ["gpu0", "gpu1", "gpu2", "gpu3"]
+  
+  # Example 2: Pipeline Parallelism only (2-stage PP)
+  - name: "vllm_pp2_gpt3_175b"
+    type: "ParallelVLLM"
+    is_target_for_workload: false
+    config:
+      model_profile_id: "GPT-3-175B"
+      block_size: 16
+      max_num_seqs: 64
+      max_num_batched_tokens: 4096
+      scheduler_iteration_delay_s: 0.0001
+      bytes_per_token_estimate_for_network: 2
+      parallelism:
+        strategy: "PP"  # Pipeline Parallelism only
+        pp_stages: 2    # 2 pipeline stages
+        num_microbatches_per_request: 4
+        gpu_ids: ["gpu4", "gpu5", "gpu6", "gpu7"]
+  
+  # Example 3: Combined TP+PP (2-way TP, 2-stage PP)
+  - name: "vllm_tp2_pp2_largemodel_100b"
+    type: "ParallelVLLM"
+    is_target_for_workload: false
+    config:
+      model_profile_id: "LargeModel-100B"
+      block_size: 16
+      max_num_seqs: 128
+      max_num_batched_tokens: 8192
+      scheduler_iteration_delay_s: 0.0001
+      bytes_per_token_estimate_for_network: 2
+      parallelism:
+        strategy: "TP_PP"  # Combined TP and PP
+        tp_degree: 2       # 2-way tensor parallelism per stage
+        pp_stages: 2       # 2 pipeline stages
+        num_microbatches_per_request: 4
+        gpu_ids: ["gpu0", "gpu1", "gpu2", "gpu3"]  # Total 4 GPUs = 2 TP * 2 PP
+  
+  # Example 4: Data Parallelism via replicated instances
+  # (Each replica runs independently on its own GPU)
+  - name: "vllm_dp_replica1_llama2_7b"
+    type: "VLLM"
+    is_target_for_workload: true
+    config:
+      model_profile_id: "Llama2-7B"
+      gpu_id: "gpu4"  # Single GPU for this replica
+      block_size: 16
+      max_num_seqs: 256
+      max_num_batched_tokens: 8192
+      scheduler_iteration_delay_s: 0.0001
+      bytes_per_token_estimate_for_network: 2
+      # No parallelism config needed for single-GPU instance
+      
+  - name: "vllm_dp_replica2_llama2_7b"
+    type: "VLLM"
+    is_target_for_workload: true
+    config:
+      model_profile_id: "Llama2-7B"
+      gpu_id: "gpu5"  # Single GPU for this replica
+      block_size: 16
+      max_num_seqs: 256
+      max_num_batched_tokens: 8192
+      scheduler_iteration_delay_s: 0.0001
+      bytes_per_token_estimate_for_network: 2
+
+# Metrics configuration
+metrics_config:
+  percentiles_to_calculate: [0.5, 0.9, 0.95, 0.99]
+  warm_up_duration_s: 60  # Exclude first minute from statistics
+  output_summary_json_path: "experiments/results/summary_parallel_example.json"
+  output_requests_csv_path: "experiments/results/requests_parallel_example.csv"
