@@ -1,0 +1,99 @@
+# Example experiment configuration for LLMPerfOracle
+# This configuration simulates a chatbot workload on vLLM with an A100 GPU profile
+
+simulation:
+  max_simulation_time: 600  # 10 minutes
+  random_seed: 42
+
+# Path to model characteristics database
+model_characteristics_db_path: "./configs/model_params.json"
+
+# Virtual hardware configuration
+hardware_profile:
+  compute_devices:
+    - device_id: "gpu0"
+      device_type: "GPU"
+      # A100 80GB profile
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000  # 80 GB
+      memory_gbps: 2039  # GB/s
+      processing_units: 108  # SMs
+      
+  network_links:
+    - link_id: "client_to_server"
+      source_id: "client_node_0"
+      dest_id: "framework_entry_0"
+      bandwidth_bps: 10_000_000_000  # 10 Gbps
+      latency_s: 0.0001  # 100 microseconds
+      bidirectional: true
+
+# Workload configuration
+workload:
+  total_duration: 600
+  bytes_per_token_estimate_for_network: 2
+  random_seed: 123
+  max_turns_per_session: 5
+  
+  client_profiles:
+    # Interactive chatbot users
+    - profile_name: "interactive_chat"
+      weight: 0.7
+      inter_arrival_time_dist_config:
+        type: "Exponential"
+        rate: 5.0  # 5 requests per second average
+      prompt_tokens_dist_config:
+        type: "LogNormal"
+        mean: 128
+        sigma: 64
+        is_int: true
+      max_output_tokens_dist_config:
+        type: "LogNormal"
+        mean: 256
+        sigma: 128
+        is_int: true
+      conversational_probability: 0.6
+      streaming_response_probability: 0.95
+      follow_up_inter_arrival_time_dist_config:
+        type: "Exponential"
+        rate: 0.2  # 5 seconds average between turns
+        
+    # Batch processing users
+    - profile_name: "batch_processing"
+      weight: 0.3
+      inter_arrival_time_dist_config:
+        type: "Exponential"
+        rate: 2.0  # 2 requests per second
+      prompt_tokens_dist_config:
+        type: "Uniform"
+        low: 500
+        high: 1000
+        is_int: true
+      max_output_tokens_dist_config:
+        type: "Constant"
+        value: 512
+        is_int: true
+      conversational_probability: 0.0
+      streaming_response_probability: 0.0
+
+# LLM serving frameworks to test
+frameworks_to_test:
+  - name: "vllm_llama2_7b"
+    type: "VLLM"
+    is_target_for_workload: true
+    config:
+      model_profile_id: "Llama2-7B"
+      gpu_id: "gpu0"
+      block_size: 16  # tokens per KV cache block
+      max_num_seqs: 256
+      max_num_batched_tokens: 8192
+      scheduler_iteration_delay_s: 0.0001
+      bytes_per_token_estimate_for_network: 2
+
+# Metrics configuration
+metrics_config:
+  percentiles_to_calculate: [0.5, 0.9, 0.95, 0.99]
+  warm_up_duration_s: 60  # Exclude first minute from statistics
+  output_summary_json_path: "experiments/results/summary_example.json"
+  output_requests_csv_path: "experiments/results/requests_example.csv"

@@ -1,0 +1,351 @@
+"""vLLM framework simulation implementation."""
+
+import logging
+from typing import Any, Dict, List, Optional, Tuple
+
+import simpy
+
+from .abstract_framework import AbstractLLMFramework
+from .models import SequenceState
+
+logger = logging.getLogger(__name__)
+
+
+class VLLMFramework(AbstractLLMFramework):
+    """Simulates the vLLM serving framework with PagedAttention and continuous batching."""
+    
+    def __init__(
+        self,
+        framework_id: str,
+        simpy_env: simpy.Environment,
+        framework_specific_config: Dict[str, Any],
+        virtual_hardware: Any,
+        metrics_collector: Any,
+        model_profile: Dict[str, Any],
+    ):
+        """Initialize vLLM framework simulation.
+        
+        Additional config parameters:
+            - gpu_id: ID of the virtual GPU to use
+            - block_size: KV cache block size in tokens
+            - max_num_seqs: Maximum concurrent sequences
+            - max_num_batched_tokens: Max tokens per scheduling iteration
+            - scheduler_iteration_delay_s: Delay between scheduler iterations
+        """
+        super().__init__(
+            framework_id,
+            simpy_env,
+            framework_specific_config,
+            virtual_hardware,
+            metrics_collector,
+            model_profile,
+        )
+        
+        # vLLM specific configuration
+        self.gpu_id = self.config.get("gpu_id", "gpu0")
+        self.block_size = self.config.get("block_size", 16)
+        self.max_running_sequences = self.config.get("max_num_seqs", 256)
+        self.max_batched_tokens_per_iteration = self.config.get("max_num_batched_tokens", 4096)
+        
+        # PagedAttention KV cache management
+        self._init_kv_cache()
+        
+        # Continuous batching scheduler state
+        self.waiting_sequences: List[Any] = []  # Requests waiting for prefill
+        self.running_sequences: Dict[str, SequenceState] = {}  # Active sequences
+        self.swapped_sequences: List[Any] = []  # For future preemption support
+        
+        logger.info(
+            f"vLLM {framework_id} initialized: "
+            f"GPU={self.gpu_id}, block_size={self.block_size}, "
+            f"max_seqs={self.max_running_sequences}"
+        )
+    
+    def _init_kv_cache(self) -> None:
+        """Initialize PagedAttention KV cache structures."""
+        # Calculate total KV cache blocks available
+        device_info = self.virtual_hardware.get_device_info(self.gpu_id)
+        if not device_info:
+            raise ValueError(f"GPU {self.gpu_id} not found in virtual hardware")
+        
+        # Estimate GPU memory available for KV cache (assume 90% after model weights)
+        gpu_memory_for_kv = device_info.memory_capacity_bytes * 0.9
+        bytes_per_block = self._bytes_per_kv_block()
+        
+        self.num_gpu_blocks = int(gpu_memory_for_kv / bytes_per_block)
+        
+        # SimPy container to track free blocks
+        self.gpu_blocks_container = simpy.Container(
+            self.simpy_env, capacity=self.num_gpu_blocks, init=self.num_gpu_blocks
+        )
+        
+        logger.info(
+            f"Initialized KV cache: {self.num_gpu_blocks} blocks, "
+            f"{bytes_per_block / 1e6:.1f} MB per block"
+        )
+    
+    def _bytes_per_kv_block(self) -> int:
+        """Calculate bytes per KV cache block."""
+        return (
+            self.block_size *
+            self.model_profile["kv_cache_bytes_per_token_per_layer"] *
+            self.model_profile["num_layers"]
+        )
+    
+    def _calculate_prompt_kv_blocks(self, num_prompt_tokens: int) -> int:
+        """Calculate KV blocks needed for a prompt."""
+        return (num_prompt_tokens + self.block_size - 1) // self.block_size
+    
+    def handle_incoming_request(self, request: Any) -> simpy.Process:
+        """Handle incoming request by adding to arrival queue."""
+        def _handle_request():
+            logger.debug(f"vLLM {self.framework_id} received request {request.request_id}")
+            yield self.request_arrival_queue.put(request)
+        
+        return self.simpy_env.process(_handle_request())
+    
+    def processing_loop(self) -> simpy.events.Event:
+        """Main vLLM continuous batching scheduler loop."""
+        logger.info(f"Starting vLLM processing loop for {self.framework_id}")
+        
+        while True:
+            # Part 1: Try to admit new sequences from arrival queue
+            newly_admitted = yield from self._admit_new_sequences()
+            
+            # Part 2: Schedule iteration (Prefill + Decode)
+            prefill_batch, decode_batch = self._schedule_iteration()
+            
+            # Part 3: Execute Prefill Batch
+            if prefill_batch:
+                yield from self._execute_prefill_batch(prefill_batch)
+            
+            # Part 4: Execute Decode Batch
+            if decode_batch:
+                yield from self._execute_decode_batch(decode_batch)
+            
+            # Part 5: Yield if no work was done
+            if not prefill_batch and not decode_batch and not newly_admitted:
+                yield self.simpy_env.timeout(
+                    self.config.get("scheduler_iteration_delay_s", 0.001)
+                )
+    
+    def _admit_new_sequences(self) -> List[Any]:
+        """Try to admit new sequences from the arrival queue."""
+        newly_admitted = []
+        
+        # Check if we have capacity for new sequences
+        if len(self.running_sequences) >= self.max_running_sequences:
+            return newly_admitted
+        
+        # Try to admit requests from the queue
+        while (
+            len(self.request_arrival_queue.items) > 0 and
+            len(self.running_sequences) < self.max_running_sequences
+        ):
+            # Peek at the first request
+            request = self.request_arrival_queue.items[0]
+            
+            # Check if we have enough KV blocks
+            required_blocks = self._calculate_prompt_kv_blocks(request.prompt_num_tokens)
+            if self.gpu_blocks_container.level >= required_blocks:
+                # Admit the request
+                yield self.request_arrival_queue.get()
+                
+                # Allocate KV blocks
+                yield self.virtual_hardware.allocate_memory(
+                    self.gpu_id, required_blocks * self._bytes_per_kv_block()
+                )
+                yield self.gpu_blocks_container.get(required_blocks)
+                
+                # Create sequence state
+                seq_state = SequenceState(
+                    request_id=request.request_id,
+                    request=request,
+                    status="WAITING_FOR_PREFILL",
+                    allocated_kv_blocks=list(range(required_blocks)),  # Simplified block tracking
+                )
+                
+                self.running_sequences[request.request_id] = seq_state
+                self.waiting_sequences.append(request)
+                newly_admitted.append(request)
+                
+                logger.debug(
+                    f"Admitted request {request.request_id}, allocated {required_blocks} KV blocks"
+                )
+            else:
+                # Not enough KV blocks available
+                break
+        
+        return newly_admitted
+    
+    def _schedule_iteration(self) -> Tuple[List[SequenceState], List[SequenceState]]:
+        """Schedule sequences for the current iteration."""
+        prefill_batch = []
+        decode_batch = []
+        current_batched_tokens = 0
+        
+        # First, add decoding sequences
+        for req_id, seq_state in list(self.running_sequences.items()):
+            if (
+                seq_state.status == "DECODING" and
+                current_batched_tokens < self.max_batched_tokens_per_iteration
+            ):
+                decode_batch.append(seq_state)
+                current_batched_tokens += 1
+        
+        # Then, add prefilling sequences
+        for request in list(self.waiting_sequences):
+            if request.request_id in self.running_sequences:
+                seq_state = self.running_sequences[request.request_id]
+                if seq_state.status == "WAITING_FOR_PREFILL":
+                    if (current_batched_tokens + request.prompt_num_tokens) <= self.max_batched_tokens_per_iteration:
+                        prefill_batch.append(seq_state)
+                        current_batched_tokens += request.prompt_num_tokens
+                        self.waiting_sequences.remove(request)
+                        seq_state.status = "PREFILLING"
+                    else:
+                        break
+        
+        return prefill_batch, decode_batch
+    
+    def _execute_prefill_batch(self, prefill_batch: List[SequenceState]) -> None:
+        """Execute prefill for a batch of sequences."""
+        prefill_processes = []
+        
+        for seq_state in prefill_batch:
+            # Estimate prefill operations
+            task_desc = self._estimate_prefill_ops(
+                seq_state.request.prompt_num_tokens,
+                batch_size=1  # Individual prefills
+            )
+            task_desc["task_id"] = f"{seq_state.request.request_id}_prefill"
+            
+            # Log prefill start
+            self.metrics_collector.log_prefill_start(
+                seq_state.request.request_id, self.simpy_env.now
+            )
+            seq_state.prefill_start_time = self.simpy_env.now
+            
+            # Submit to hardware
+            prefill_proc = self.virtual_hardware.submit_computation_task(self.gpu_id, task_desc)
+            prefill_processes.append(prefill_proc)
+        
+        # Wait for all prefills to complete
+        yield simpy.AllOf(self.simpy_env, prefill_processes)
+        
+        # Update sequence states
+        for seq_state in prefill_batch:
+            if seq_state.request.request_id in self.running_sequences:
+                seq_state.status = "DECODING"
+                seq_state.prompt_tokens_processed = seq_state.request.prompt_num_tokens
+    
+    def _execute_decode_batch(self, decode_batch: List[SequenceState]) -> None:
+        """Execute one decode step for a batch of sequences."""
+        if not decode_batch:
+            return
+        
+        # Estimate decode operations for the entire batch
+        task_desc = self._estimate_decode_op(batch_size=len(decode_batch))
+        task_desc["task_id"] = f"decode_batch_{self.simpy_env.now}"
+        
+        # Submit to hardware
+        yield self.virtual_hardware.submit_computation_task(self.gpu_id, task_desc)
+        
+        current_time = self.simpy_env.now
+        completed_sequences = []
+        
+        # Process each sequence in the batch
+        for seq_state in decode_batch:
+            if seq_state.request.request_id not in self.running_sequences:
+                continue
+            
+            # Log first token if this is the first decode
+            if seq_state.output_tokens_generated == 0:
+                self.metrics_collector.log_first_token_generated(
+                    seq_state.request.request_id,
+                    current_time,
+                    seq_state.prefill_start_time
+                )
+                seq_state.first_token_time = current_time
+            
+            # Generate one token
+            seq_state.output_tokens_generated += 1
+            self.metrics_collector.log_token_decoded(
+                seq_state.request.request_id,
+                current_time,
+                seq_state.output_tokens_generated
+            )
+            
+            # Simulate streaming response
+            if seq_state.request.streaming_response:
+                token_data_size = self.config.get("bytes_per_token_estimate_for_network", 2)
+                # Fire and forget network transfer for streaming
+                self.virtual_hardware.submit_network_transfer_task(
+                    self.gpu_id,
+                    "client_node_0",
+                    token_data_size
+                )
+            
+            # Check completion conditions
+            if (
+                seq_state.output_tokens_generated >= seq_state.request.max_output_tokens or
+                self._check_eos_condition(seq_state)
+            ):
+                self.metrics_collector.log_request_completed(
+                    seq_state.request.request_id,
+                    current_time,
+                    seq_state.output_tokens_generated,
+                    "SUCCESS"
+                )
+                completed_sequences.append(seq_state.request.request_id)
+            else:
+                # Check if we need a new KV block
+                total_tokens = seq_state.prompt_tokens_processed + seq_state.output_tokens_generated
+                if total_tokens % self.block_size == 0:
+                    # Try to allocate a new block
+                    can_allocate = self.gpu_blocks_container.get(1)
+                    block_allocated = yield can_allocate | self.simpy_env.timeout(0)
+                    
+                    if can_allocate not in block_allocated:
+                        # Out of KV blocks
+                        self.metrics_collector.log_request_completed(
+                            seq_state.request.request_id,
+                            current_time,
+                            seq_state.output_tokens_generated,
+                            "OOM_KV_BLOCK"
+                        )
+                        completed_sequences.append(seq_state.request.request_id)
+                        yield from self._release_sequence_resources(seq_state)
+        
+        # Clean up completed sequences
+        for req_id in completed_sequences:
+            if req_id in self.running_sequences:
+                seq_state = self.running_sequences.pop(req_id)
+                yield from self._release_sequence_resources(seq_state)
+    
+    def _release_sequence_resources(self, seq_state: SequenceState) -> simpy.events.Event:
+        """Release resources held by a sequence."""
+        num_blocks = len(seq_state.allocated_kv_blocks)
+        if num_blocks > 0:
+            yield self.gpu_blocks_container.put(num_blocks)
+            yield self.virtual_hardware.free_memory(
+                self.gpu_id,
+                num_blocks * self._bytes_per_kv_block()
+            )
+            logger.debug(f"Released {num_blocks} KV blocks from {seq_state.request.request_id}")
+    
+    def _check_eos_condition(self, seq_state: SequenceState) -> bool:
+        """Check if end-of-sequence condition is met."""
+        # Placeholder - in real vLLM this would check for EOS token
+        return False
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current framework status."""
+        return {
+            "framework_id": self.framework_id,
+            "queue_length": len(self.request_arrival_queue.items),
+            "waiting_sequences": len(self.waiting_sequences),
+            "running_sequences": len(self.running_sequences),
+            "kv_blocks_used": self.num_gpu_blocks - self.gpu_blocks_container.level,
+            "kv_blocks_total": self.num_gpu_blocks,
+        }

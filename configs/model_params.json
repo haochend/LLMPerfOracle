@@ -1,0 +1,77 @@
+{
+  "Llama2-7B": {
+    "parameters": 7000000000,
+    "hidden_size": 4096,
+    "num_layers": 32,
+    "num_attention_heads": 32,
+    "prefill_op_stats": {
+      "flops_per_token": 14000000000,
+      "memory_bytes_per_token": 28000000
+    },
+    "decode_op_stats": {
+      "flops_per_token": 14000000000,
+      "memory_bytes_per_token": 56000000
+    },
+    "kv_cache_bytes_per_token_per_layer": 16384
+  },
+  "Llama2-13B": {
+    "parameters": 13000000000,
+    "hidden_size": 5120,
+    "num_layers": 40,
+    "num_attention_heads": 40,
+    "prefill_op_stats": {
+      "flops_per_token": 26000000000,
+      "memory_bytes_per_token": 52000000
+    },
+    "decode_op_stats": {
+      "flops_per_token": 26000000000,
+      "memory_bytes_per_token": 104000000
+    },
+    "kv_cache_bytes_per_token_per_layer": 20480
+  },
+  "Llama3-8B": {
+    "parameters": 8000000000,
+    "hidden_size": 4096,
+    "num_layers": 32,
+    "num_attention_heads": 32,
+    "prefill_op_stats": {
+      "flops_per_token": 16000000000,
+      "memory_bytes_per_token": 32000000
+    },
+    "decode_op_stats": {
+      "flops_per_token": 16000000000,
+      "memory_bytes_per_token": 64000000
+    },
+    "kv_cache_bytes_per_token_per_layer": 16384
+  },
+  "Mistral-7B": {
+    "parameters": 7000000000,
+    "hidden_size": 4096,
+    "num_layers": 32,
+    "num_attention_heads": 32,
+    "prefill_op_stats": {
+      "flops_per_token": 14000000000,
+      "memory_bytes_per_token": 28000000
+    },
+    "decode_op_stats": {
+      "flops_per_token": 14000000000,
+      "memory_bytes_per_token": 56000000
+    },
+    "kv_cache_bytes_per_token_per_layer": 16384
+  },
+  "GPT-3-175B": {
+    "parameters": 175000000000,
+    "hidden_size": 12288,
+    "num_layers": 96,
+    "num_attention_heads": 96,
+    "prefill_op_stats": {
+      "flops_per_token": 350000000000,
+      "memory_bytes_per_token": 700000000
+    },
+    "decode_op_stats": {
+      "flops_per_token": 350000000000,
+      "memory_bytes_per_token": 1400000000
+    },
+    "kv_cache_bytes_per_token_per_layer": 49152
+  }
+}
