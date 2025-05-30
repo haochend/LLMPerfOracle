@@ -46,8 +46,17 @@ class ParallelVLLMFramework(VLLMFramework):
             model_profile,
         )
         
-        # Pipeline parallelism specific initialization
+        # Pipeline parallelism specific validation
         if self.parallelism_strategy in ['PP', 'TP_PP']:
+            # Check if stages exceed layers
+            num_layers = self.model_profile.get('num_layers', 0)
+            if self.pp_stages > num_layers:
+                raise ValueError(f"Cannot have more PP stages ({self.pp_stages}) than model layers ({num_layers})")
+            
+            # Validate microbatch count
+            if self.num_microbatches <= 0:
+                raise ValueError(f"num_microbatches_per_request must be positive, got {self.num_microbatches}")
+            
             self._init_pipeline_parallelism()
     
     def _init_pipeline_parallelism(self):

@@ -145,9 +145,21 @@ class TestAbstractFrameworkParallelism:
         model_profile = {
             "num_layers": 32,
             "hidden_size": 4096,
+            "prefill_op_stats": {"flops_per_token": 14e9, "memory_bytes_per_token": 28e6},
+            "decode_op_stats": {"flops_per_token": 14e9, "memory_bytes_per_token": 56e6},
             "layer_types": {
-                "attention": {"flops_per_token_prefill": 1e9},
-                "mlp": {"flops_per_token_prefill": 1e9}
+                "attention": {
+                    "flops_per_token_prefill": 1e9,
+                    "flops_per_token_decode": 1e9,
+                    "memory_bytes_per_token_prefill": 1e6,
+                    "memory_bytes_per_token_decode": 2e6
+                },
+                "mlp": {
+                    "flops_per_token_prefill": 1e9,
+                    "flops_per_token_decode": 1e9,
+                    "memory_bytes_per_token_prefill": 1e6,
+                    "memory_bytes_per_token_decode": 2e6
+                }
             }
         }
         

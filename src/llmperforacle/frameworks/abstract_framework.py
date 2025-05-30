@@ -164,11 +164,23 @@ class AbstractLLMFramework(ABC):
         self.parallelism_strategy = self.parallelism_config.get('strategy', 'None')
         self.gpu_ids = self.parallelism_config.get('gpu_ids', [])
         
+        # Validate GPU list
+        if self.parallelism_strategy != 'None' and not self.gpu_ids:
+            raise ValueError("No GPUs specified for parallelism")
+        
+        # Check for duplicate GPU IDs
+        if len(self.gpu_ids) != len(set(self.gpu_ids)):
+            raise ValueError("Duplicate GPU IDs found")
+        
         # Tensor Parallelism configuration
         self.tp_degree = self.parallelism_config.get('tp_degree', 1)
+        if self.tp_degree <= 0:
+            raise ValueError("TP degree must be positive")
         
         # Pipeline Parallelism configuration
         self.pp_stages = self.parallelism_config.get('pp_stages', 1)
+        if self.pp_stages <= 0:
+            raise ValueError("PP stages must be positive")
         self.num_microbatches = self.parallelism_config.get('num_microbatches_per_request', 1)
         
         # Validate configuration
@@ -177,11 +189,11 @@ class AbstractLLMFramework(ABC):
                 raise ValueError(f"TP requires {self.tp_degree} GPUs but got {len(self.gpu_ids)}")
         elif self.parallelism_strategy == 'PP':
             if len(self.gpu_ids) % self.pp_stages != 0:
-                raise ValueError(f"PP with {self.pp_stages} stages requires GPU count divisible by {self.pp_stages}")
+                raise ValueError(f"PP requires GPU count ({len(self.gpu_ids)}) to be divisible by stages ({self.pp_stages})")
         elif self.parallelism_strategy == 'TP_PP':
             expected_gpus = self.tp_degree * self.pp_stages
             if len(self.gpu_ids) != expected_gpus:
-                raise ValueError(f"TP_PP requires {expected_gpus} GPUs (tp={self.tp_degree} * pp={self.pp_stages}) but got {len(self.gpu_ids)}")
+                raise ValueError(f"TP_PP requires {expected_gpus} GPUs but got {len(self.gpu_ids)}")
         
         # Set up GPU mappings
         self._setup_gpu_mappings()

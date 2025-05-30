@@ -61,6 +61,7 @@ class WorkloadGenerator:
         # Data parallelism load balancing
         self.load_balancing_strategy = config.get("load_balancing_strategy", "round_robin")
         self.framework_request_counts = {fw_id: 0 for fw_id in target_frameworks_map.keys()}
+        self._session_fw_mapping = {}  # Initialize session to framework mapping
         
         logger.info(
             f"WorkloadGenerator initialized with {len(self.client_profiles)} client profiles, "
@@ -320,7 +321,14 @@ class WorkloadGenerator:
                 # Check if we've seen this session before
                 session_fw_mapping = getattr(self, '_session_fw_mapping', {})
                 if request.session_id in session_fw_mapping:
-                    target_fw_id = session_fw_mapping[request.session_id]
+                    mapped_fw_id = session_fw_mapping[request.session_id]
+                    # Check if the mapped framework still exists
+                    if mapped_fw_id in framework_ids:
+                        target_fw_id = mapped_fw_id
+                    else:
+                        # Framework no longer available, select a new one
+                        target_fw_id = framework_ids[self.request_counter % len(framework_ids)]
+                        session_fw_mapping[request.session_id] = target_fw_id
                 else:
                     # New session, use round-robin
                     target_fw_id = framework_ids[self.request_counter % len(framework_ids)]
