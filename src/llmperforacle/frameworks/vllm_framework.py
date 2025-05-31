@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import simpy
 
 from .abstract_framework import AbstractLLMFramework
-from .models import SequenceState
+from .models import SequenceState, SessionCacheInfo
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,10 @@ class VLLMFramework(AbstractLLMFramework):
         self.waiting_sequences: List[Any] = []  # Requests waiting for prefill
         self.running_sequences: Dict[str, SequenceState] = {}  # Active sequences
         self.swapped_sequences: List[Any] = []  # For future preemption support
+        
+        # Prefix caching state
+        self.active_sessions_kv_state: Dict[str, 'SessionCacheInfo'] = {}  # Track KV cache per session
+        self.enable_prefix_caching = self.config.get("enable_prefix_caching", True)
         
         logger.info(
             f"vLLM {framework_id} initialized: "
@@ -162,24 +166,32 @@ class VLLMFramework(AbstractLLMFramework):
             # Peek at the first request
             request = self.request_arrival_queue.items[0]
             
-            # Check if we have enough KV blocks
-            required_blocks = self._calculate_prompt_kv_blocks(request.prompt_num_tokens)
+            # Check for prefix caching opportunities
+            cached_prefix_length, num_tokens_to_prefill = self._check_prefix_cache(request)
+            
+            # Calculate blocks needed only for new tokens
+            required_blocks = self._calculate_prompt_kv_blocks(num_tokens_to_prefill)
+            
             if self.gpu_blocks_container.level >= required_blocks:
                 # Admit the request
                 yield self.request_arrival_queue.get()
                 
-                # Allocate KV blocks
-                yield self.virtual_hardware.allocate_memory(
-                    self.gpu_id, required_blocks * self._bytes_per_kv_block()
-                )
-                yield self.gpu_blocks_container.get(required_blocks)
+                # Allocate KV blocks only for new tokens
+                if required_blocks > 0:
+                    yield self.virtual_hardware.allocate_memory(
+                        self.gpu_id, required_blocks * self._bytes_per_kv_block()
+                    )
+                    yield self.gpu_blocks_container.get(required_blocks)
                 
-                # Create sequence state
+                # Create sequence state with prefix caching info
                 seq_state = SequenceState(
                     request_id=request.request_id,
                     request=request,
                     status="WAITING_FOR_PREFILL",
                     allocated_kv_blocks=list(range(required_blocks)),  # Simplified block tracking
+                    cached_prefix_length_used=cached_prefix_length,
+                    num_tokens_requiring_prefill=num_tokens_to_prefill,
+                    prompt_tokens_fully_processed=0,  # Will be updated after prefill
                 )
                 
                 self.running_sequences[request.request_id] = seq_state
@@ -215,9 +227,11 @@ class VLLMFramework(AbstractLLMFramework):
             if request.request_id in self.running_sequences:
                 seq_state = self.running_sequences[request.request_id]
                 if seq_state.status == "WAITING_FOR_PREFILL":
-                    if (current_batched_tokens + request.prompt_num_tokens) <= self.max_batched_tokens_per_iteration:
+                    # Use actual tokens requiring prefill, not total prompt tokens
+                    tokens_for_prefill = seq_state.num_tokens_requiring_prefill
+                    if (current_batched_tokens + tokens_for_prefill) <= self.max_batched_tokens_per_iteration:
                         prefill_batch.append(seq_state)
-                        current_batched_tokens += request.prompt_num_tokens
+                        current_batched_tokens += tokens_for_prefill
                         self.waiting_sequences.remove(request)
                         seq_state.status = "PREFILLING"
                     else:
@@ -230,37 +244,58 @@ class VLLMFramework(AbstractLLMFramework):
         prefill_processes = []
         
         for seq_state in prefill_batch:
-            # Log prefill start
-            self.metrics_collector.log_prefill_start(
-                seq_state.request.request_id, self.simpy_env.now
-            )
-            seq_state.prefill_start_time = self.simpy_env.now
-            
-            if self.parallelism_strategy in ['TP', 'TP_PP']:
-                # Execute prefill with tensor parallelism
-                prefill_proc = self._execute_tp_prefill(
-                    seq_state.request.prompt_num_tokens,
-                    seq_state.request.request_id
+            if seq_state.num_tokens_requiring_prefill > 0:
+                # Log prefill start with actual tokens to prefill
+                self.metrics_collector.log_prefill_start(
+                    seq_state.request.request_id, 
+                    self.simpy_env.now,
+                    seq_state.num_tokens_requiring_prefill
                 )
+                seq_state.prefill_start_time = self.simpy_env.now
+                
+                if self.parallelism_strategy in ['TP', 'TP_PP']:
+                    # Execute prefill with tensor parallelism
+                    prefill_proc = self._execute_tp_prefill(
+                        seq_state.num_tokens_requiring_prefill,  # Use actual tokens to prefill
+                        seq_state.request.request_id
+                    )
+                else:
+                    # Regular single-GPU prefill
+                    task_desc = self._estimate_prefill_ops(
+                        seq_state.num_tokens_requiring_prefill,  # Use actual tokens to prefill
+                        batch_size=1
+                    )
+                    task_desc["task_id"] = f"{seq_state.request.request_id}_prefill"
+                    prefill_proc = self.virtual_hardware.submit_computation_task(self.gpu_id, task_desc)
+                
+                prefill_processes.append(prefill_proc)
             else:
-                # Regular single-GPU prefill
-                task_desc = self._estimate_prefill_ops(
-                    seq_state.request.prompt_num_tokens,
-                    batch_size=1
+                # Full cache hit - no prefill needed
+                self.metrics_collector.log_prefix_cache_event(
+                    seq_state.request.request_id,
+                    self.simpy_env.now,
+                    "FULL_HIT_NO_PREFILL_NEEDED",
+                    seq_state.cached_prefix_length_used,
+                    0
                 )
-                task_desc["task_id"] = f"{seq_state.request.request_id}_prefill"
-                prefill_proc = self.virtual_hardware.submit_computation_task(self.gpu_id, task_desc)
-            
-            prefill_processes.append(prefill_proc)
+                seq_state.prefill_end_time_sim = self.simpy_env.now
+                # Simulate minimal processing time for cache lookup
+                minimal_proc = self.simpy_env.timeout(0.0001)
+                prefill_processes.append(minimal_proc)
         
         # Wait for all prefills to complete
-        yield simpy.AllOf(self.simpy_env, prefill_processes)
+        if prefill_processes:
+            yield simpy.AllOf(self.simpy_env, prefill_processes)
         
         # Update sequence states
         for seq_state in prefill_batch:
             if seq_state.request.request_id in self.running_sequences:
                 seq_state.status = "DECODING"
+                # Update tokens processed to include both cached and newly prefilled
                 seq_state.prompt_tokens_processed = seq_state.request.prompt_num_tokens
+                seq_state.prompt_tokens_fully_processed = (
+                    seq_state.cached_prefix_length_used + seq_state.num_tokens_requiring_prefill
+                )
     
     def _execute_decode_batch(self, decode_batch: List[SequenceState]) -> None:
         """Execute one decode step for a batch of sequences."""
@@ -346,6 +381,9 @@ class VLLMFramework(AbstractLLMFramework):
         for req_id in completed_sequences:
             if req_id in self.running_sequences:
                 seq_state = self.running_sequences.pop(req_id)
+                # Update session cache for conversational requests
+                if seq_state.request.session_id and self.enable_prefix_caching:
+                    self._update_session_cache(seq_state)
                 yield from self._release_sequence_resources(seq_state)
     
     def _release_sequence_resources(self, seq_state: SequenceState) -> simpy.events.Event:
@@ -363,6 +401,87 @@ class VLLMFramework(AbstractLLMFramework):
         """Check if end-of-sequence condition is met."""
         # Placeholder - in real vLLM this would check for EOS token
         return False
+    
+    def _check_prefix_cache(self, request: Any) -> Tuple[int, int]:
+        """Check if request can use cached prefix and return (cached_length, tokens_to_prefill)."""
+        if not self.enable_prefix_caching:
+            return 0, request.prompt_num_tokens
+        
+        cached_prefix_length = 0
+        num_tokens_to_prefill = request.prompt_num_tokens
+        
+        # Check for conversational prefix cache hit
+        if request.is_conversational_turn and request.session_id in self.active_sessions_kv_state:
+            session_cache_info = self.active_sessions_kv_state[request.session_id]
+            
+            # Assume the prompt includes the full history (cached content + new input)
+            if request.prompt_num_tokens > session_cache_info.total_tokens_in_cache:
+                # We can reuse the cached prefix
+                cached_prefix_length = session_cache_info.total_tokens_in_cache
+                num_tokens_to_prefill = request.prompt_num_tokens - cached_prefix_length
+                
+                # Log cache hit
+                self.metrics_collector.log_prefix_cache_event(
+                    request.request_id,
+                    self.simpy_env.now,
+                    "CONVERSATIONAL_HIT",
+                    cached_prefix_length,
+                    num_tokens_to_prefill
+                )
+                logger.debug(
+                    f"Prefix cache hit for {request.request_id}: "
+                    f"reusing {cached_prefix_length} tokens, prefilling {num_tokens_to_prefill} new tokens"
+                )
+            else:
+                # Unexpected: conversational turn with shorter prompt
+                self.metrics_collector.log_prefix_cache_event(
+                    request.request_id,
+                    self.simpy_env.now,
+                    "CONVERSATIONAL_MISS_UNEXPECTED_PROMPT",
+                    0,
+                    request.prompt_num_tokens
+                )
+                logger.warning(
+                    f"Conversational turn {request.request_id} has shorter prompt than cached history"
+                )
+        else:
+            # No conversational cache hit
+            self.metrics_collector.log_prefix_cache_event(
+                request.request_id,
+                self.simpy_env.now,
+                "MISS_FULL",
+                0,
+                request.prompt_num_tokens
+            )
+        
+        return cached_prefix_length, num_tokens_to_prefill
+    
+    def _update_session_cache(self, completed_seq_state: SequenceState) -> None:
+        """Update session cache info after a sequence completes."""
+        session_id = completed_seq_state.request.session_id
+        if not session_id:
+            return
+        
+        # Create new session cache info
+        new_cache_info = SessionCacheInfo(
+            session_id=session_id,
+            total_tokens_in_cache=(
+                completed_seq_state.prompt_tokens_fully_processed + 
+                completed_seq_state.output_tokens_generated
+            ),
+            prompt_part_length=completed_seq_state.prompt_tokens_fully_processed,
+            response_part_length=completed_seq_state.output_tokens_generated,
+            associated_sequence_id=completed_seq_state.request.request_id,
+            kv_block_ids=completed_seq_state.allocated_kv_blocks.copy(),
+            last_update_time=self.simpy_env.now
+        )
+        
+        self.active_sessions_kv_state[session_id] = new_cache_info
+        
+        logger.debug(
+            f"Updated session cache for {session_id}: "
+            f"{new_cache_info.total_tokens_in_cache} tokens cached"
+        )
     
     def get_status(self) -> Dict[str, Any]:
         """Get current framework status."""

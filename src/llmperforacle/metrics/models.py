@@ -31,6 +31,11 @@ class RequestMetricsEntry:
     time_per_output_token_ms: Optional[float] = None
     prefill_duration_ms: Optional[float] = None
     decode_duration_ms: Optional[float] = None
+    
+    # Prefix caching metrics
+    prefix_cache_event_type: Optional[str] = None  # CONVERSATIONAL_HIT, MISS_FULL, etc.
+    cached_prefix_length_used: int = 0
+    num_tokens_actually_prefilled: Optional[int] = None
 
 
 @dataclass

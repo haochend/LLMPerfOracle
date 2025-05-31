@@ -1,0 +1,125 @@
+# Example configuration demonstrating prefix caching for conversational workloads
+
+simulation:
+  max_simulation_time: 60
+  random_seed: 42
+
+# Model characteristics database path
+model_characteristics_db_path: "configs/model_params.json"
+
+# Hardware configuration
+hardware_profile:
+  compute_devices:
+    - device_id: "gpu0"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000  # 80GB
+      memory_gbps: 2039
+      processing_units: 108
+
+  network_links:
+    - link_id: "client_to_server"
+      source_id: "client_node_0"
+      dest_id: "framework_entry_0"
+      bandwidth_bps: 10_000_000_000  # 10 Gbps
+      latency_s: 0.0001
+      bidirectional: true
+
+# Workload configuration - conversational pattern
+workload:
+  total_duration: 60
+  bytes_per_token_estimate_for_network: 2
+  
+  client_profiles:
+    # Conversational users (e.g., chatbot interactions)
+    - profile_name: "chat_users"
+      weight: 0.7  # 70% of traffic
+      
+      # Initial request arrival
+      inter_arrival_time_dist_config:
+        type: "Exponential"
+        rate: 1.0  # 1 new conversation per second
+      
+      # Prompt grows over conversation
+      # NOTE: Current implementation limitation - tokens don't accumulate
+      # In production, follow-up prompts should include full history
+      prompt_tokens_dist_config:
+        type: "Constant"
+        value: 500
+        is_int: true
+      
+      max_output_tokens_dist_config:
+        type: "Uniform"
+        low: 50
+        high: 150
+        is_int: true
+      
+      # High probability of follow-up turns
+      conversational_probability: 0.8
+      
+      # Quick follow-ups within conversation
+      follow_up_inter_arrival_time_dist_config:
+        type: "Exponential"
+        rate: 2.0  # ~0.5s between turns
+      
+      streaming_response_probability: 0.0
+    
+    # One-shot queries (e.g., API calls)
+    - profile_name: "api_users"
+      weight: 0.3  # 30% of traffic
+      
+      inter_arrival_time_dist_config:
+        type: "Exponential"
+        rate: 2.0
+      
+      prompt_tokens_dist_config:
+        type: "Uniform"
+        low: 100
+        high: 400
+        is_int: true
+      
+      max_output_tokens_dist_config:
+        type: "Uniform"
+        low: 20
+        high: 100
+        is_int: true
+      
+      conversational_probability: 0.0  # No follow-ups
+      streaming_response_probability: 0.0
+
+# Framework configuration with prefix caching
+frameworks_to_test:
+  - name: "vllm_with_prefix_cache"
+    type: "VLLM"
+    is_target_for_workload: true
+    config:
+      model_profile_id: "Llama2-7B"
+      gpu_id: "gpu0"
+      
+      # KV cache configuration
+      block_size: 16
+      max_num_seqs: 64
+      max_num_batched_tokens: 2048
+      
+      # Enable prefix caching (default: true)
+      enable_prefix_caching: true
+      
+      # Scheduling
+      scheduler_iteration_delay_s: 0.0001
+
+# Metrics configuration
+metrics_config:
+  percentiles_to_calculate: [0.5, 0.9, 0.95, 0.99]
+  warm_up_duration_s: 5
+  output_summary_json_path: "experiments/results/prefix_caching_demo.json"
+  output_requests_csv_path: "experiments/results/prefix_caching_demo.csv"
+
+# Expected Results with Prefix Caching:
+# - Conversational hit rate: 60-80% (for chat_users follow-ups)
+# - Overall hit rate: 40-60% (mixed with api_users)
+# - Prefill reduction: 30-50% for conversational workload
+# - TTFT improvement: 20-40% for cache hits
+#
+# To compare without caching, set enable_prefix_caching: false

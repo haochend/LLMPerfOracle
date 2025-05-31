@@ -69,10 +69,13 @@ class MetricsCollector:
         if request_id in self.all_request_metrics:
             self.all_request_metrics[request_id].dispatch_time_sim = dispatch_time
     
-    def log_prefill_start(self, request_id: str, prefill_start_time: float) -> None:
+    def log_prefill_start(self, request_id: str, prefill_start_time: float, num_tokens_actually_prefilled: Optional[int] = None) -> None:
         """Log when prefill processing starts for a request."""
         if request_id in self.all_request_metrics:
-            self.all_request_metrics[request_id].prefill_start_time_sim = prefill_start_time
+            entry = self.all_request_metrics[request_id]
+            entry.prefill_start_time_sim = prefill_start_time
+            if num_tokens_actually_prefilled is not None:
+                entry.num_tokens_actually_prefilled = num_tokens_actually_prefilled
     
     def log_first_token_generated(
         self, request_id: str, first_token_time: float, prefill_start_time: float
@@ -198,6 +201,27 @@ class MetricsCollector:
         )
         self.network_link_usage_log[link_id].append(metric)
     
+    def log_prefix_cache_event(
+        self, 
+        request_id: str, 
+        timestamp: float, 
+        event_type: str, 
+        cached_prefix_length: int,
+        num_tokens_prefilled_after_cache_check: int
+    ) -> None:
+        """Log prefix cache events."""
+        if request_id in self.all_request_metrics:
+            entry = self.all_request_metrics[request_id]
+            # Store prefix cache info
+            entry.prefix_cache_event_type = event_type
+            entry.cached_prefix_length_used = cached_prefix_length
+            entry.num_tokens_actually_prefilled = num_tokens_prefilled_after_cache_check
+            
+            logger.debug(
+                f"Prefix cache {event_type} for {request_id}: "
+                f"cached={cached_prefix_length}, to_prefill={num_tokens_prefilled_after_cache_check}"
+            )
+    
     def generate_summary_report(self, simulation_duration_s: float) -> Dict[str, Any]:
         """Generate comprehensive summary statistics.
         
@@ -269,6 +293,11 @@ class MetricsCollector:
             },
             "gpu_utilization": self._calculate_gpu_utilization(simulation_duration_s),
         }
+        
+        # Add prefix caching metrics
+        prefix_cache_stats = self._calculate_prefix_cache_stats(filtered_requests)
+        if prefix_cache_stats:
+            summary["prefix_caching"] = prefix_cache_stats
         
         # Log summary
         logger.info("=" * 60)
@@ -342,6 +371,9 @@ class MetricsCollector:
                 "ttft_ms": entry.time_to_first_token_ms,
                 "tpot_ms": entry.time_per_output_token_ms,
                 "e2e_latency_ms": entry.end_to_end_latency_ms,
+                "prefix_cache_event": getattr(entry, 'prefix_cache_event_type', None),
+                "cached_prefix_length": getattr(entry, 'cached_prefix_length_used', 0),
+                "tokens_actually_prefilled": getattr(entry, 'num_tokens_actually_prefilled', None),
             })
         
         return pd.DataFrame(metrics_list)
@@ -365,3 +397,62 @@ class MetricsCollector:
                         })
         
         return pd.DataFrame(metrics_list)
+    
+    def _calculate_prefix_cache_stats(self, requests: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Calculate prefix caching statistics."""
+        if not requests:
+            return None
+        
+        # Count cache events by type
+        event_counts = {
+            "CONVERSATIONAL_HIT": 0,
+            "CROSS_REQUEST_HIT": 0,
+            "MISS_FULL": 0,
+            "FULL_HIT_NO_PREFILL_NEEDED": 0,
+            "CONVERSATIONAL_MISS_UNEXPECTED_PROMPT": 0,
+        }
+        
+        total_cached_tokens = 0
+        total_prefilled_tokens = 0
+        total_prompt_tokens = 0
+        conversational_requests = 0
+        
+        for entry in requests.values():
+            # Count event types
+            if hasattr(entry, 'prefix_cache_event_type') and entry.prefix_cache_event_type:
+                event_type = entry.prefix_cache_event_type
+                if event_type in event_counts:
+                    event_counts[event_type] += 1
+            
+            # Track token counts
+            total_prompt_tokens += entry.prompt_num_tokens
+            if hasattr(entry, 'cached_prefix_length_used'):
+                total_cached_tokens += entry.cached_prefix_length_used
+            if hasattr(entry, 'num_tokens_actually_prefilled') and entry.num_tokens_actually_prefilled is not None:
+                total_prefilled_tokens += entry.num_tokens_actually_prefilled
+            
+            # Count conversational requests
+            if entry.session_id:
+                conversational_requests += 1
+        
+        # Calculate hit rates
+        total_events = sum(event_counts.values())
+        hits = event_counts["CONVERSATIONAL_HIT"] + event_counts["CROSS_REQUEST_HIT"] + event_counts["FULL_HIT_NO_PREFILL_NEEDED"]
+        
+        stats = {
+            "overall_hit_rate": hits / total_events if total_events > 0 else 0,
+            "conversational_hit_rate": event_counts["CONVERSATIONAL_HIT"] / conversational_requests if conversational_requests > 0 else 0,
+            "event_counts": event_counts,
+            "average_cached_prefix_length": total_cached_tokens / hits if hits > 0 else 0,
+            "average_tokens_prefilled": total_prefilled_tokens / len(requests) if requests else 0,
+            "prefill_reduction_ratio": 1 - (total_prefilled_tokens / total_prompt_tokens) if total_prompt_tokens > 0 else 0,
+            "total_tokens_saved": total_cached_tokens,
+        }
+        
+        # Log prefix caching summary
+        if stats["overall_hit_rate"] > 0:
+            logger.info(f"Prefix Cache Hit Rate: {stats['overall_hit_rate']:.1%}")
+            logger.info(f"Prefill Reduction: {stats['prefill_reduction_ratio']:.1%}")
+            logger.info(f"Total Tokens Saved: {stats['total_tokens_saved']:,}")
+        
+        return stats

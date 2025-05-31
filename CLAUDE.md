@@ -125,6 +125,12 @@ pytest tests/integration/test_parallel_simulation_improved.py -v
 - **Data Parallelism (DP)**: Multiple model replicas with load balancing
 - **Combined TP+PP**: Hierarchical parallelism for large models
 
+### Prefix Caching (KV Cache Reuse)
+- Conversational requests can reuse KV cache from previous turns
+- Reduces prefill computation for shared prompt prefixes
+- Tracks session state in `active_sessions_kv_state`
+- Enable with `enable_prefix_caching: true` in framework config
+
 ### Request Flow
 1. WorkloadGenerator creates Request object
 2. Simulates network transfer to framework

@@ -87,3 +87,16 @@ The generator tracks conversation sessions:
 - Manages follow-up timing
 - Tracks conversation turn counts
 - Simulates realistic multi-turn patterns
+- **Token Accumulation**: Accumulates tokens across conversational turns to simulate growing context
+  - Enable/disable with `accumulate_conversational_tokens` config (default: True)
+  - Each turn includes: previous prompt + previous response + new user input
+  - Allows proper testing of prefix caching benefits
+
+### Token Accumulation Example
+
+For a conversation with 3 turns:
+- Turn 1: 100 prompt tokens, 50 output tokens
+- Turn 2: 100 + 50 + 80 = 230 prompt tokens (accumulated)
+- Turn 3: 230 + 60 + 100 = 390 prompt tokens (accumulated)
+
+This realistic simulation enables frameworks to demonstrate prefix caching effectiveness.

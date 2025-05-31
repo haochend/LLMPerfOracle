@@ -161,14 +161,31 @@ class WorkloadGenerator:
         if session_info["is_continuation"]:
             session_id = session_info["session_id"]
             is_conversational_turn = True
-            client_id = self.active_sessions[session_id]["client_id"]
+            session_data = self.active_sessions[session_id]
+            client_id = session_data["client_id"]
+            
+            # For conversational turns, accumulate tokens to simulate growing context
+            # The prompt includes: previous prompt + previous response + new user input
+            new_user_input = self.sampler.sample(profile.prompt_tokens_dist_config)
+            
+            # Check if we should use accumulated tokens (for prefix caching simulation)
+            if self.config.get("accumulate_conversational_tokens", True):
+                # Accumulated tokens = previous prompt + previous response + new input
+                prompt_num_tokens = (
+                    session_data["accumulated_prompt_tokens"] + 
+                    session_data["accumulated_output_tokens"] + 
+                    new_user_input
+                )
+            else:
+                # Use sampled value directly (old behavior)
+                prompt_num_tokens = new_user_input
         else:
             session_id = f"sess_{self.request_counter}"
             is_conversational_turn = False
             client_id = f"client_{profile.profile_name}_{self.request_counter % 100}"
+            # Sample request characteristics normally for new conversations
+            prompt_num_tokens = self.sampler.sample(profile.prompt_tokens_dist_config)
         
-        # Sample request characteristics
-        prompt_num_tokens = self.sampler.sample(profile.prompt_tokens_dist_config)
         max_output_tokens = self.sampler.sample(profile.max_output_tokens_dist_config)
         streaming_response = random.random() < profile.streaming_response_probability
         
@@ -253,12 +270,21 @@ class WorkloadGenerator:
                 "start_time": self.simpy_env.now,
                 "next_turn_time": self.simpy_env.now + follow_up_iat,
                 "turn_count": 1,
+                "accumulated_prompt_tokens": request.prompt_num_tokens,
+                "accumulated_output_tokens": request.max_output_tokens,  # Estimate
+                "profile_name": profile.profile_name,
             }
         elif request.is_conversational_turn:
             # Update existing conversation
             session_data = self.active_sessions.get(request.session_id)
             if session_data:
                 session_data["turn_count"] += 1
+                
+                # Update accumulated tokens for the next turn
+                # The next prompt will include: current prompt + current output + new input
+                # Since this is after the request is created, we update for the next turn
+                session_data["accumulated_prompt_tokens"] = request.prompt_num_tokens
+                session_data["accumulated_output_tokens"] = request.max_output_tokens  # Still an estimate
                 
                 # Decide if conversation continues
                 max_turns = self.config.get("max_turns_per_session", 10)

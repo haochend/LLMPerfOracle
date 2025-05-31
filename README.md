@@ -297,6 +297,32 @@ Contributions are welcome! Please:
 3. Add tests for new functionality
 4. Submit a pull request
 
+## Prefix Caching Support
+
+LLMPerfOracle now supports simulation of prefix caching (KV cache reuse) for conversational workloads:
+
+### Benefits
+- Reduces prefill computation for requests sharing common prefixes
+- Improves TTFT for conversational follow-ups
+- More efficient memory usage through KV cache sharing
+
+### Configuration
+```yaml
+frameworks_to_test:
+  - name: "vllm_with_caching"
+    type: "VLLM"
+    config:
+      enable_prefix_caching: true  # Default: true
+```
+
+### Metrics
+The simulation reports prefix caching statistics:
+- Overall and conversational hit rates
+- Prefill reduction ratio
+- Total tokens saved from caching
+
+See `docs/prefix_caching_implementation.md` for detailed implementation notes.
+
 ## Future Enhancements
 
 - Additional framework implementations (TensorRT-LLM, SGLang, Dynama)
@@ -308,6 +334,8 @@ Contributions are welcome! Please:
 - Integration with real workload traces
 - Pipeline bubble optimization strategies
 - Expert parallelism for MoE models
+- Cross-request prefix caching for shared system prompts
+- Advanced KV cache eviction policies
 
 ## License
 
