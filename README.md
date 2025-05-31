@@ -267,6 +267,12 @@ pytest tests/
 
 # Run specific test
 pytest tests/test_basic_simulation.py
+
+# Run quick parallelism tests (demonstrates TP, PP, DP benefits)
+pytest tests/integration/test_parallel_simulation_quick.py -v
+
+# Run comprehensive parallelism tests (longer, more thorough)
+pytest tests/integration/test_parallel_simulation_improved.py -v
 ```
 
 ### Code Style

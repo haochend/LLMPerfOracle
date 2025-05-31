@@ -69,6 +69,9 @@ class ParallelVLLMFramework(VLLMFramework):
         # Track microbatch states
         self.active_microbatches: Dict[str, List[MicrobatchState]] = {}
         
+        # Track sequences pending deletion (completed but still have active microbatches)
+        self.sequences_pending_deletion: Dict[str, Any] = {}
+        
         # Start pipeline stage worker processes
         for stage_idx in range(self.pp_stages):
             self.simpy_env.process(self._pipeline_stage_worker_process(stage_idx))
@@ -76,6 +79,67 @@ class ParallelVLLMFramework(VLLMFramework):
         logger.info(
             f"Initialized pipeline parallelism with {self.pp_stages} stages"
         )
+    
+    def _init_kv_cache(self) -> None:
+        """Initialize KV cache for pipeline parallelism - only for assigned layers."""
+        if self.parallelism_strategy in ['PP', 'TP_PP']:
+            # For PP, each stage only needs KV cache for its assigned layers
+            # The _bytes_per_kv_block method is already overridden to account for this
+            
+            # Get total memory available for this stage
+            if self.parallelism_strategy == 'TP_PP':
+                # For TP+PP, sum memory across TP group for this stage
+                total_memory = 0
+                # Use first stage's GPU assignment as representative
+                for gpu_id in self.pp_stage_to_gpus[0]:
+                    device_info = self.virtual_hardware.get_device_info(gpu_id)
+                    if not device_info:
+                        raise ValueError(f"GPU {gpu_id} not found in virtual hardware")
+                    total_memory += device_info.memory_capacity_bytes
+                gpu_memory_for_kv = total_memory * 0.9
+            else:
+                # For PP only, use memory from first GPU of first stage
+                gpu_id = self.pp_stage_to_gpus[0][0]
+                device_info = self.virtual_hardware.get_device_info(gpu_id)
+                if not device_info:
+                    raise ValueError(f"GPU {gpu_id} not found in virtual hardware")
+                gpu_memory_for_kv = device_info.memory_capacity_bytes * 0.9
+            
+            # Use the overridden _bytes_per_kv_block which accounts for layers per stage
+            bytes_per_block = self._bytes_per_kv_block()
+            self.num_gpu_blocks = int(gpu_memory_for_kv / bytes_per_block)
+            
+            # Create container with adjusted capacity
+            self.gpu_blocks_container = simpy.Container(
+                self.simpy_env, capacity=self.num_gpu_blocks, init=self.num_gpu_blocks
+            )
+            
+            total_layers = self.model_profile.get('num_layers', 32)
+            layers_per_stage = total_layers / self.pp_stages
+            
+            logger.info(
+                f"PP KV cache initialized: {self.num_gpu_blocks} blocks for {layers_per_stage:.1f} layers "
+                f"({bytes_per_block / 1024:.1f} KB per block)"
+            )
+        else:
+            # Fall back to parent implementation for non-PP
+            super()._init_kv_cache()
+    
+    def _bytes_per_kv_block(self) -> int:
+        """Calculate bytes per KV cache block for PP - only for assigned layers."""
+        if self.parallelism_strategy in ['PP', 'TP_PP']:
+            # For PP, only count layers assigned to this pipeline stage
+            total_layers = self.model_profile.get('num_layers', 32)
+            layers_per_stage = total_layers / self.pp_stages
+            
+            return int(
+                self.block_size *
+                self.model_profile["kv_cache_bytes_per_token_per_layer"] *
+                layers_per_stage
+            )
+        else:
+            # Fall back to parent implementation
+            return super()._bytes_per_kv_block()
     
     def processing_loop(self) -> simpy.events.Event:
         """Main processing loop with pipeline parallelism support."""
@@ -132,8 +196,8 @@ class ParallelVLLMFramework(VLLMFramework):
             # Dispatch to first stage
             yield self.stage_input_queues[0].put(mb_state)
         
-        # Track microbatches for this request
-        self.active_microbatches[request.request_id] = microbatch_states
+        # Track active microbatch indices for this request (for easier removal tracking)
+        self.active_microbatches[request.request_id] = set(range(num_microbatches))
         
         logger.debug(
             f"Created {num_microbatches} microbatches for request {request.request_id}"
@@ -175,11 +239,13 @@ class ParallelVLLMFramework(VLLMFramework):
             f"for microbatch {microbatch.request_id}_{microbatch.microbatch_idx}"
         )
         
-        # Get sequence state
+        # Get sequence state - check both running and pending deletion
         seq_state = self.running_sequences.get(microbatch.request_id)
         if not seq_state:
-            logger.warning(f"Sequence {microbatch.request_id} not found")
-            return
+            seq_state = self.sequences_pending_deletion.get(microbatch.request_id)
+            if not seq_state:
+                logger.warning(f"Sequence {microbatch.request_id} not found in running or pending")
+                return
         
         # Process each layer in this stage
         for layer_idx in range(start_layer, end_layer + 1):
@@ -275,22 +341,31 @@ class ParallelVLLMFramework(VLLMFramework):
     
     def _complete_microbatch(self, microbatch: MicrobatchState) -> simpy.events.Event:
         """Handle completion of a microbatch at the last stage."""
-        # Check if all microbatches for this request are complete
+        # Check if we're tracking this request
         if microbatch.request_id not in self.active_microbatches:
             return
         
-        microbatch_states = self.active_microbatches[microbatch.request_id]
-        microbatch_states[microbatch.microbatch_idx].current_stage = -1  # Mark as complete
+        # Remove this microbatch index from active set
+        active_indices = self.active_microbatches[microbatch.request_id]
+        active_indices.discard(microbatch.microbatch_idx)
         
         # Check if all microbatches are complete
-        all_complete = all(mb.current_stage == -1 for mb in microbatch_states)
-        
-        if all_complete and microbatch.is_prefill:
-            # Prefill complete, start decode iterations
-            seq_state = self.running_sequences.get(microbatch.request_id)
-            if seq_state:
-                seq_state.status = "DECODING"
-                seq_state.prompt_tokens_processed = seq_state.request.prompt_num_tokens
+        if len(active_indices) == 0:
+            # All microbatches complete
+            del self.active_microbatches[microbatch.request_id]
+            
+            # Check if sequence is pending deletion
+            if microbatch.request_id in self.sequences_pending_deletion:
+                # Now safe to remove the sequence
+                seq_state = self.sequences_pending_deletion.pop(microbatch.request_id)
+                yield from self._release_sequence_resources(seq_state)
+                logger.debug(f"Released pending sequence {microbatch.request_id}")
+            elif microbatch.is_prefill:
+                # Prefill complete, update sequence state
+                seq_state = self.running_sequences.get(microbatch.request_id)
+                if seq_state:
+                    seq_state.status = "DECODING"
+                    seq_state.prompt_tokens_processed = seq_state.request.prompt_num_tokens
                 
                 # Log first token time
                 self.metrics_collector.log_first_token_generated(
@@ -310,6 +385,10 @@ class ParallelVLLMFramework(VLLMFramework):
         
         # Generate tokens until max_output_tokens
         while seq_state.output_tokens_generated < request.max_output_tokens:
+            # Track new decode microbatches
+            if request.request_id not in self.active_microbatches:
+                self.active_microbatches[request.request_id] = set()
+            
             # Create decode microbatches
             for mb_idx in range(self.num_microbatches):
                 mb_state = MicrobatchState(
@@ -320,6 +399,9 @@ class ParallelVLLMFramework(VLLMFramework):
                     is_prefill=False,
                     arrival_time_at_stage=self.simpy_env.now
                 )
+                
+                # Track this microbatch
+                self.active_microbatches[request.request_id].add(mb_idx)
                 
                 # Dispatch to first stage
                 yield self.stage_input_queues[0].put(mb_state)
@@ -345,9 +427,15 @@ class ParallelVLLMFramework(VLLMFramework):
                     "SUCCESS"
                 )
                 
-                # Clean up
+                # Clean up - check for active microbatches first
                 if request.request_id in self.running_sequences:
-                    self.running_sequences.pop(request.request_id)
-                    yield from self._release_sequence_resources(seq_state)
+                    if request.request_id in self.active_microbatches and len(self.active_microbatches[request.request_id]) > 0:
+                        # Defer cleanup
+                        self.sequences_pending_deletion[request.request_id] = self.running_sequences.pop(request.request_id)
+                        logger.debug(f"Deferring cleanup of completed sequence {request.request_id}")
+                    else:
+                        # Safe to clean up now
+                        self.running_sequences.pop(request.request_id)
+                        yield from self._release_sequence_resources(seq_state)
                 
                 break
