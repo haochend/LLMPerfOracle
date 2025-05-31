@@ -37,3 +37,18 @@ class SessionCacheInfo:
     associated_sequence_id: str  # The request_id currently holding this session's cache
     kv_block_ids: List[Any] = field(default_factory=list)  # Optional, for detailed block management
     last_update_time: float = 0.0  # Simulation time, for potential eviction policies
+
+
+@dataclass
+class GlobalPrefixCacheInfo:
+    """Information about a globally cached prefix that can be shared across requests."""
+    
+    prefix_hash: str  # Hash of the token sequence
+    prefix_length: int  # Number of tokens in the prefix
+    kv_block_ids: List[Any] = field(default_factory=list)  # KV cache blocks storing this prefix
+    reference_count: int = 0  # Number of active sequences using this prefix
+    last_access_time: float = 0.0  # For LRU eviction
+    creation_time: float = 0.0  # When this prefix was first cached
+    access_count: int = 0  # Total number of times this prefix was reused
+    # Optional: store actual prefix tokens for verification (in production, this would be memory-intensive)
+    prefix_tokens: Optional[List[int]] = None

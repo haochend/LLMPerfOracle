@@ -8,6 +8,7 @@ import simpy
 
 from .models import ClientProfile, Request
 from .sampler import DistributionSampler
+from .token_generator import TokenGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,11 @@ class WorkloadGenerator:
         self.sampler = DistributionSampler(seed)
         if seed is not None:
             random.seed(seed)
+        
+        # Initialize token generator for cross-request prefix testing
+        self.token_generator = TokenGenerator(seed)
+        self.enable_token_generation = config.get("generate_prompt_tokens", False)
+        self.prefix_config = config.get("prefix_patterns", {})
         
         # Parse client profiles
         self.client_profiles = self._parse_client_profiles(config.get("client_profiles", []))
@@ -194,6 +200,11 @@ class WorkloadGenerator:
         if profile.user_priority_dist_config:
             user_priority = self.sampler.sample(profile.user_priority_dist_config)
         
+        # Generate actual tokens if enabled
+        prompt_tokens = None
+        if self.enable_token_generation:
+            prompt_tokens = self._generate_prompt_tokens(profile, prompt_num_tokens)
+        
         request = Request(
             request_id=request_id,
             client_id=client_id,
@@ -204,6 +215,7 @@ class WorkloadGenerator:
             is_conversational_turn=is_conversational_turn,
             streaming_response=streaming_response,
             user_priority=user_priority,
+            prompt_tokens=prompt_tokens,
         )
         
         logger.debug(
@@ -375,3 +387,79 @@ class WorkloadGenerator:
         self.framework_request_counts[target_fw_id] += 1
         
         return target_fw_id
+    
+    def _generate_prompt_tokens(self, profile: ClientProfile, target_length: int) -> List[int]:
+        """Generate synthetic prompt tokens based on profile configuration.
+        
+        Args:
+            profile: Client profile with potential prefix pattern config
+            target_length: Target number of tokens to generate
+            
+        Returns:
+            List of token IDs
+        """
+        # Check if profile has specific prefix pattern configuration
+        profile_prefix_config = getattr(profile, 'prefix_pattern', None)
+        if not profile_prefix_config and self.prefix_config:
+            # Use global prefix config with weighted selection
+            if 'patterns' in self.prefix_config:
+                patterns = self.prefix_config['patterns']
+                weights = [p.get('weight', 1.0) for p in patterns]
+                selected_pattern = random.choices(patterns, weights=weights)[0]
+                profile_prefix_config = selected_pattern
+        
+        if profile_prefix_config:
+            # Generate tokens with specified prefix pattern
+            prefix_type = profile_prefix_config.get('type', 'random')
+            
+            if prefix_type == 'system':
+                # System prompt pattern
+                prefix_name = profile_prefix_config.get('name', 'helpful_assistant')
+                variable_length = max(0, target_length - 50)  # System prompts are ~50 tokens
+                return self.token_generator.generate_tokens_with_prefix(
+                    'system', prefix_name, variable_length
+                )
+            
+            elif prefix_type == 'few_shot':
+                # Few-shot example pattern
+                prefix_name = profile_prefix_config.get('name', 'classification_3shot')
+                # Few-shot examples are longer, adjust variable length accordingly
+                prefix_lengths = {'classification_3shot': 300, 'qa_5shot': 500, 'translation_2shot': 200}
+                prefix_len = prefix_lengths.get(prefix_name, 300)
+                variable_length = max(0, target_length - prefix_len)
+                return self.token_generator.generate_tokens_with_prefix(
+                    'few_shot', prefix_name, variable_length
+                )
+            
+            elif prefix_type == 'instruction':
+                # Instruction template pattern
+                prefix_name = profile_prefix_config.get('name', 'analyze_data')
+                prefix_lengths = {'analyze_data': 100, 'write_code': 150, 'explain_concept': 120}
+                prefix_len = prefix_lengths.get(prefix_name, 100)
+                variable_length = max(0, target_length - prefix_len)
+                return self.token_generator.generate_tokens_with_prefix(
+                    'instruction', prefix_name, variable_length
+                )
+            
+            elif prefix_type == 'mixed':
+                # Multiple prefix components
+                components = profile_prefix_config.get('components', [])
+                # Calculate total prefix length
+                total_prefix_len = 0
+                for comp in components:
+                    if comp['type'] == 'system':
+                        total_prefix_len += 50
+                    elif comp['type'] == 'few_shot':
+                        lens = {'classification_3shot': 300, 'qa_5shot': 500, 'translation_2shot': 200}
+                        total_prefix_len += lens.get(comp['name'], 300)
+                    elif comp['type'] == 'instruction':
+                        lens = {'analyze_data': 100, 'write_code': 150, 'explain_concept': 120}
+                        total_prefix_len += lens.get(comp['name'], 100)
+                
+                variable_length = max(0, target_length - total_prefix_len)
+                return self.token_generator.generate_mixed_prefix_tokens(
+                    components, variable_length
+                )
+        
+        # Default: generate random tokens
+        return self.token_generator.generate_random_tokens(target_length)

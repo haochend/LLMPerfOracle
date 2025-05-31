@@ -6,7 +6,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import simpy
 
 from .abstract_framework import AbstractLLMFramework
-from .models import SequenceState, SessionCacheInfo
+from .models import SequenceState, SessionCacheInfo, GlobalPrefixCacheInfo
+from .prefix_utils import hash_token_sequence, find_longest_prefix_match, should_cache_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +63,15 @@ class VLLMFramework(AbstractLLMFramework):
         self.swapped_sequences: List[Any] = []  # For future preemption support
         
         # Prefix caching state
-        self.active_sessions_kv_state: Dict[str, 'SessionCacheInfo'] = {}  # Track KV cache per session
+        self.active_sessions_kv_state: Dict[str, SessionCacheInfo] = {}  # Track KV cache per session
         self.enable_prefix_caching = self.config.get("enable_prefix_caching", True)
+        
+        # Global prefix cache for cross-request caching
+        self.global_prefix_store: Dict[str, GlobalPrefixCacheInfo] = {}
+        self.enable_cross_request_caching = self.config.get("enable_cross_request_caching", True)
+        self.min_prefix_length = self.config.get("min_prefix_cache_length", 50)
+        self.max_prefix_cache_size = self.config.get("max_prefix_cache_size", 100)
+        self.global_prefix_eviction_policy = self.config.get("prefix_eviction_policy", "lru")
         
         logger.info(
             f"vLLM {framework_id} initialized: "
@@ -384,6 +392,9 @@ class VLLMFramework(AbstractLLMFramework):
                 # Update session cache for conversational requests
                 if seq_state.request.session_id and self.enable_prefix_caching:
                     self._update_session_cache(seq_state)
+                # Consider adding to global cache
+                if self.enable_cross_request_caching:
+                    self._maybe_add_to_global_cache(seq_state)
                 yield from self._release_sequence_resources(seq_state)
     
     def _release_sequence_resources(self, seq_state: SequenceState) -> simpy.events.Event:
@@ -409,8 +420,9 @@ class VLLMFramework(AbstractLLMFramework):
         
         cached_prefix_length = 0
         num_tokens_to_prefill = request.prompt_num_tokens
+        cache_hit_type = None
         
-        # Check for conversational prefix cache hit
+        # Priority 1: Check for conversational prefix cache hit
         if request.is_conversational_turn and request.session_id in self.active_sessions_kv_state:
             session_cache_info = self.active_sessions_kv_state[request.session_id]
             
@@ -419,40 +431,59 @@ class VLLMFramework(AbstractLLMFramework):
                 # We can reuse the cached prefix
                 cached_prefix_length = session_cache_info.total_tokens_in_cache
                 num_tokens_to_prefill = request.prompt_num_tokens - cached_prefix_length
+                cache_hit_type = "CONVERSATIONAL_HIT"
                 
-                # Log cache hit
-                self.metrics_collector.log_prefix_cache_event(
-                    request.request_id,
-                    self.simpy_env.now,
-                    "CONVERSATIONAL_HIT",
-                    cached_prefix_length,
-                    num_tokens_to_prefill
-                )
                 logger.debug(
-                    f"Prefix cache hit for {request.request_id}: "
+                    f"Conversational cache hit for {request.request_id}: "
                     f"reusing {cached_prefix_length} tokens, prefilling {num_tokens_to_prefill} new tokens"
                 )
             else:
                 # Unexpected: conversational turn with shorter prompt
-                self.metrics_collector.log_prefix_cache_event(
-                    request.request_id,
-                    self.simpy_env.now,
-                    "CONVERSATIONAL_MISS_UNEXPECTED_PROMPT",
-                    0,
-                    request.prompt_num_tokens
-                )
+                cache_hit_type = "CONVERSATIONAL_MISS_UNEXPECTED_PROMPT"
                 logger.warning(
                     f"Conversational turn {request.request_id} has shorter prompt than cached history"
                 )
-        else:
-            # No conversational cache hit
-            self.metrics_collector.log_prefix_cache_event(
-                request.request_id,
-                self.simpy_env.now,
-                "MISS_FULL",
-                0,
-                request.prompt_num_tokens
+        
+        # Priority 2: Check for cross-request prefix cache hit (if no conversational hit)
+        if (cache_hit_type is None and self.enable_cross_request_caching and 
+            hasattr(request, 'prompt_tokens') and request.prompt_tokens):
+            
+            # Find longest matching prefix in global cache
+            matching_hash, prefix_length = find_longest_prefix_match(
+                request.prompt_tokens,
+                self.global_prefix_store,
+                self.min_prefix_length
             )
+            
+            if matching_hash:
+                # Found a matching prefix
+                cached_prefix_length = prefix_length
+                num_tokens_to_prefill = request.prompt_num_tokens - cached_prefix_length
+                cache_hit_type = "CROSS_REQUEST_HIT"
+                
+                # Update access statistics
+                prefix_info = self.global_prefix_store[matching_hash]
+                prefix_info.reference_count += 1
+                prefix_info.last_access_time = self.simpy_env.now
+                prefix_info.access_count += 1
+                
+                logger.debug(
+                    f"Cross-request cache hit for {request.request_id}: "
+                    f"reusing {cached_prefix_length} tokens from hash {matching_hash[:8]}..."
+                )
+        
+        # No cache hit
+        if cache_hit_type is None:
+            cache_hit_type = "MISS_FULL"
+        
+        # Log the cache event
+        self.metrics_collector.log_prefix_cache_event(
+            request.request_id,
+            self.simpy_env.now,
+            cache_hit_type,
+            cached_prefix_length,
+            num_tokens_to_prefill
+        )
         
         return cached_prefix_length, num_tokens_to_prefill
     
@@ -482,6 +513,111 @@ class VLLMFramework(AbstractLLMFramework):
             f"Updated session cache for {session_id}: "
             f"{new_cache_info.total_tokens_in_cache} tokens cached"
         )
+    
+    def _maybe_add_to_global_cache(self, seq_state: SequenceState) -> None:
+        """Consider adding a prefix to the global cache after processing."""
+        if not self.enable_cross_request_caching:
+            return
+        
+        request = seq_state.request
+        if not hasattr(request, 'prompt_tokens') or not request.prompt_tokens:
+            return
+        
+        # Only cache if this was a cache miss and the prefix is long enough
+        if seq_state.cached_prefix_length_used > 0:
+            return  # This request already used a cached prefix
+        
+        prompt_length = len(request.prompt_tokens)
+        if not should_cache_prefix(
+            prompt_length, 
+            self.min_prefix_length,
+            self.max_prefix_cache_size,
+            len(self.global_prefix_store)
+        ):
+            return
+        
+        # Check for multiple potential prefix lengths (e.g., 50, 100, 150 tokens)
+        prefix_lengths_to_check = [
+            length for length in [50, 100, 200, 300, 500]
+            if length <= prompt_length
+        ]
+        
+        for prefix_length in prefix_lengths_to_check:
+            prefix_hash = hash_token_sequence(request.prompt_tokens, prefix_length)
+            
+            # Skip if already cached
+            if prefix_hash in self.global_prefix_store:
+                continue
+            
+            # Add to global cache
+            self._add_prefix_to_global_cache(
+                prefix_hash,
+                prefix_length,
+                request.prompt_tokens[:prefix_length],
+                seq_state
+            )
+            break  # Only cache one prefix length per request
+    
+    def _add_prefix_to_global_cache(
+        self, 
+        prefix_hash: str, 
+        prefix_length: int,
+        prefix_tokens: List[int],
+        seq_state: SequenceState
+    ) -> None:
+        """Add a new prefix to the global cache."""
+        # Evict if at capacity
+        if len(self.global_prefix_store) >= self.max_prefix_cache_size:
+            self._evict_from_global_cache()
+        
+        # Create cache entry
+        cache_info = GlobalPrefixCacheInfo(
+            prefix_hash=prefix_hash,
+            prefix_length=prefix_length,
+            kv_block_ids=[],  # Simplified: not tracking actual blocks
+            reference_count=1,
+            last_access_time=self.simpy_env.now,
+            creation_time=self.simpy_env.now,
+            access_count=0,
+            prefix_tokens=prefix_tokens if self.config.get("store_prefix_tokens", False) else None
+        )
+        
+        self.global_prefix_store[prefix_hash] = cache_info
+        
+        logger.debug(
+            f"Added prefix to global cache: hash={prefix_hash[:8]}..., "
+            f"length={prefix_length}, cache_size={len(self.global_prefix_store)}"
+        )
+    
+    def _evict_from_global_cache(self) -> None:
+        """Evict entries from global cache based on policy (LRU by default)."""
+        if not self.global_prefix_store:
+            return
+        
+        if self.global_prefix_eviction_policy == "lru":
+            # Find least recently used entry with reference count 0
+            eviction_candidate = None
+            oldest_access_time = float('inf')
+            
+            for prefix_hash, cache_info in self.global_prefix_store.items():
+                if cache_info.reference_count == 0 and cache_info.last_access_time < oldest_access_time:
+                    eviction_candidate = prefix_hash
+                    oldest_access_time = cache_info.last_access_time
+            
+            if eviction_candidate:
+                evicted = self.global_prefix_store.pop(eviction_candidate)
+                logger.debug(
+                    f"Evicted prefix from global cache: hash={eviction_candidate[:8]}..., "
+                    f"length={evicted.prefix_length}, access_count={evicted.access_count}"
+                )
+            else:
+                logger.warning("Global prefix cache full but no entries eligible for eviction")
+    
+    def _decrement_global_prefix_ref_count(self, seq_state: SequenceState) -> None:
+        """Decrement reference count when a sequence using a global prefix completes."""
+        # In the simplified model, we track which prefix was used via the sequence state
+        # In a real implementation, this would be more sophisticated
+        pass
     
     def get_status(self) -> Dict[str, Any]:
         """Get current framework status."""

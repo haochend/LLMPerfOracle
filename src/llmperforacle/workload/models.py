@@ -1,7 +1,7 @@
 """Data models for workload generation."""
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -18,6 +18,7 @@ class Request:
     is_conversational_turn: bool = False
     streaming_response: bool = True
     user_priority: int = 0
+    prompt_tokens: Optional[List[int]] = None  # Actual token IDs for prefix matching
 
 
 @dataclass

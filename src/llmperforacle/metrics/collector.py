@@ -439,14 +439,23 @@ class MetricsCollector:
         total_events = sum(event_counts.values())
         hits = event_counts["CONVERSATIONAL_HIT"] + event_counts["CROSS_REQUEST_HIT"] + event_counts["FULL_HIT_NO_PREFILL_NEEDED"]
         
+        # Calculate cross-request specific metrics
+        cross_request_eligible = total_events - conversational_requests
+        cross_request_hit_rate = 0
+        if cross_request_eligible > 0:
+            cross_request_hit_rate = event_counts["CROSS_REQUEST_HIT"] / cross_request_eligible
+        
         stats = {
             "overall_hit_rate": hits / total_events if total_events > 0 else 0,
             "conversational_hit_rate": event_counts["CONVERSATIONAL_HIT"] / conversational_requests if conversational_requests > 0 else 0,
+            "cross_request_hit_rate": cross_request_hit_rate,
             "event_counts": event_counts,
             "average_cached_prefix_length": total_cached_tokens / hits if hits > 0 else 0,
             "average_tokens_prefilled": total_prefilled_tokens / len(requests) if requests else 0,
             "prefill_reduction_ratio": 1 - (total_prefilled_tokens / total_prompt_tokens) if total_prompt_tokens > 0 else 0,
             "total_tokens_saved": total_cached_tokens,
+            "cross_request_hits": event_counts["CROSS_REQUEST_HIT"],
+            "conversational_hits": event_counts["CONVERSATIONAL_HIT"],
         }
         
         # Log prefix caching summary
