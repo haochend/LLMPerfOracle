@@ -119,7 +119,7 @@
       }
     }
   },
-  "Mistral-7B": {
+  "Mistral-7B-v0.3": {
     "parameters": 7000000000,
     "hidden_size": 4096,
     "num_layers": 32,
@@ -199,40 +199,282 @@
       }
     }
   },
-  "LargeModel-100B": {
-    "parameters": 100000000000,
+  "Llama3-70B": {
+    "parameters": 70000000000,
     "hidden_size": 8192,
     "num_layers": 80,
     "num_attention_heads": 64,
     "num_kv_heads": 8,
     "intermediate_size": 28672,
-    "vocab_size": 32000,
+    "vocab_size": 128256,
     "prefill_op_stats": {
-      "flops_per_token": 200000000000,
-      "memory_bytes_per_token": 400000000
+      "flops_per_token": 140000000000,
+      "memory_bytes_per_token": 280000000
     },
     "decode_op_stats": {
-      "flops_per_token": 200000000000,
-      "memory_bytes_per_token": 800000000
+      "flops_per_token": 140000000000,
+      "memory_bytes_per_token": 560000000
     },
-    "kv_cache_bytes_per_token_per_layer": 32768,
+    "kv_cache_bytes_per_token_per_layer": 16384,
     "layer_types": {
       "attention": {
-        "flops_per_token_prefill": 2500000000,
-        "flops_per_token_decode": 2500000000,
-        "memory_bytes_per_token_prefill": 5000000,
-        "memory_bytes_per_token_decode": 10000000,
+        "flops_per_token_prefill": 1750000000,
+        "flops_per_token_decode": 1750000000,
+        "memory_bytes_per_token_prefill": 3500000,
+        "memory_bytes_per_token_decode": 7000000,
         "activation_output_bytes_per_token": 16384,
         "is_tp_shardable_qkv": true,
         "is_tp_shardable_output_proj": true,
         "tp_collective_type": "AllReduce"
       },
       "mlp": {
-        "flops_per_token_prefill": 2500000000,
-        "flops_per_token_decode": 2500000000,
-        "memory_bytes_per_token_prefill": 5000000,
-        "memory_bytes_per_token_decode": 10000000,
+        "flops_per_token_prefill": 1750000000,
+        "flops_per_token_decode": 1750000000,
+        "memory_bytes_per_token_prefill": 3500000,
+        "memory_bytes_per_token_decode": 7000000,
         "activation_output_bytes_per_token": 16384,
+        "is_tp_shardable_gate_up": true,
+        "is_tp_shardable_down_proj": true,
+        "tp_collective_type": "AllReduce"
+      }
+    }
+  },
+  "Qwen2.5-7B": {
+    "parameters": 7700000000,
+    "hidden_size": 3584,
+    "num_layers": 28,
+    "num_attention_heads": 28,
+    "num_kv_heads": 4,
+    "intermediate_size": 18944,
+    "vocab_size": 152064,
+    "prefill_op_stats": {
+      "flops_per_token": 15400000000,
+      "memory_bytes_per_token": 30800000
+    },
+    "decode_op_stats": {
+      "flops_per_token": 15400000000,
+      "memory_bytes_per_token": 61600000
+    },
+    "kv_cache_bytes_per_token_per_layer": 2048,
+    "layer_types": {
+      "attention": {
+        "flops_per_token_prefill": 550000000,
+        "flops_per_token_decode": 550000000,
+        "memory_bytes_per_token_prefill": 1100000,
+        "memory_bytes_per_token_decode": 2200000,
+        "activation_output_bytes_per_token": 7168,
+        "is_tp_shardable_qkv": true,
+        "is_tp_shardable_output_proj": true,
+        "tp_collective_type": "AllReduce"
+      },
+      "mlp": {
+        "flops_per_token_prefill": 550000000,
+        "flops_per_token_decode": 550000000,
+        "memory_bytes_per_token_prefill": 1100000,
+        "memory_bytes_per_token_decode": 2200000,
+        "activation_output_bytes_per_token": 7168,
+        "is_tp_shardable_gate_up": true,
+        "is_tp_shardable_down_proj": true,
+        "tp_collective_type": "AllReduce"
+      }
+    }
+  },
+  "Qwen2.5-32B": {
+    "parameters": 32500000000,
+    "hidden_size": 5120,
+    "num_layers": 64,
+    "num_attention_heads": 40,
+    "num_kv_heads": 8,
+    "intermediate_size": 27648,
+    "vocab_size": 152064,
+    "prefill_op_stats": {
+      "flops_per_token": 65000000000,
+      "memory_bytes_per_token": 130000000
+    },
+    "decode_op_stats": {
+      "flops_per_token": 65000000000,
+      "memory_bytes_per_token": 260000000
+    },
+    "kv_cache_bytes_per_token_per_layer": 5120,
+    "layer_types": {
+      "attention": {
+        "flops_per_token_prefill": 1015625000,
+        "flops_per_token_decode": 1015625000,
+        "memory_bytes_per_token_prefill": 2031250,
+        "memory_bytes_per_token_decode": 4062500,
+        "activation_output_bytes_per_token": 10240,
+        "is_tp_shardable_qkv": true,
+        "is_tp_shardable_output_proj": true,
+        "tp_collective_type": "AllReduce"
+      },
+      "mlp": {
+        "flops_per_token_prefill": 1015625000,
+        "flops_per_token_decode": 1015625000,
+        "memory_bytes_per_token_prefill": 2031250,
+        "memory_bytes_per_token_decode": 4062500,
+        "activation_output_bytes_per_token": 10240,
+        "is_tp_shardable_gate_up": true,
+        "is_tp_shardable_down_proj": true,
+        "tp_collective_type": "AllReduce"
+      }
+    }
+  },
+  "Qwen2.5-72B": {
+    "parameters": 72700000000,
+    "hidden_size": 8192,
+    "num_layers": 80,
+    "num_attention_heads": 64,
+    "num_kv_heads": 8,
+    "intermediate_size": 29568,
+    "vocab_size": 152064,
+    "prefill_op_stats": {
+      "flops_per_token": 145400000000,
+      "memory_bytes_per_token": 290800000
+    },
+    "decode_op_stats": {
+      "flops_per_token": 145400000000,
+      "memory_bytes_per_token": 581600000
+    },
+    "kv_cache_bytes_per_token_per_layer": 16384,
+    "layer_types": {
+      "attention": {
+        "flops_per_token_prefill": 1817500000,
+        "flops_per_token_decode": 1817500000,
+        "memory_bytes_per_token_prefill": 3635000,
+        "memory_bytes_per_token_decode": 7270000,
+        "activation_output_bytes_per_token": 16384,
+        "is_tp_shardable_qkv": true,
+        "is_tp_shardable_output_proj": true,
+        "tp_collective_type": "AllReduce"
+      },
+      "mlp": {
+        "flops_per_token_prefill": 1817500000,
+        "flops_per_token_decode": 1817500000,
+        "memory_bytes_per_token_prefill": 3635000,
+        "memory_bytes_per_token_decode": 7270000,
+        "activation_output_bytes_per_token": 16384,
+        "is_tp_shardable_gate_up": true,
+        "is_tp_shardable_down_proj": true,
+        "tp_collective_type": "AllReduce"
+      }
+    }
+  },
+  "Mixtral-8x7B": {
+    "parameters": 46700000000,
+    "hidden_size": 4096,
+    "num_layers": 32,
+    "num_attention_heads": 32,
+    "num_kv_heads": 8,
+    "intermediate_size": 14336,
+    "vocab_size": 32000,
+    "num_experts": 8,
+    "num_experts_per_tok": 2,
+    "prefill_op_stats": {
+      "flops_per_token": 28000000000,
+      "memory_bytes_per_token": 93400000
+    },
+    "decode_op_stats": {
+      "flops_per_token": 28000000000,
+      "memory_bytes_per_token": 186800000
+    },
+    "kv_cache_bytes_per_token_per_layer": 16384,
+    "layer_types": {
+      "attention": {
+        "flops_per_token_prefill": 437500000,
+        "flops_per_token_decode": 437500000,
+        "memory_bytes_per_token_prefill": 2918750,
+        "memory_bytes_per_token_decode": 5837500,
+        "activation_output_bytes_per_token": 8192,
+        "is_tp_shardable_qkv": true,
+        "is_tp_shardable_output_proj": true,
+        "tp_collective_type": "AllReduce"
+      },
+      "mlp": {
+        "flops_per_token_prefill": 437500000,
+        "flops_per_token_decode": 437500000,
+        "memory_bytes_per_token_prefill": 2918750,
+        "memory_bytes_per_token_decode": 5837500,
+        "activation_output_bytes_per_token": 8192,
+        "is_tp_shardable_gate_up": true,
+        "is_tp_shardable_down_proj": true,
+        "tp_collective_type": "AllReduce"
+      }
+    }
+  },
+  "Gemma2-9B": {
+    "parameters": 9240000000,
+    "hidden_size": 3584,
+    "num_layers": 42,
+    "num_attention_heads": 16,
+    "num_kv_heads": 8,
+    "intermediate_size": 14336,
+    "vocab_size": 256000,
+    "prefill_op_stats": {
+      "flops_per_token": 18480000000,
+      "memory_bytes_per_token": 36960000
+    },
+    "decode_op_stats": {
+      "flops_per_token": 18480000000,
+      "memory_bytes_per_token": 73920000
+    },
+    "kv_cache_bytes_per_token_per_layer": 3584,
+    "layer_types": {
+      "attention": {
+        "flops_per_token_prefill": 440000000,
+        "flops_per_token_decode": 440000000,
+        "memory_bytes_per_token_prefill": 880000,
+        "memory_bytes_per_token_decode": 1760000,
+        "activation_output_bytes_per_token": 7168,
+        "is_tp_shardable_qkv": true,
+        "is_tp_shardable_output_proj": true,
+        "tp_collective_type": "AllReduce"
+      },
+      "mlp": {
+        "flops_per_token_prefill": 440000000,
+        "flops_per_token_decode": 440000000,
+        "memory_bytes_per_token_prefill": 880000,
+        "memory_bytes_per_token_decode": 1760000,
+        "activation_output_bytes_per_token": 7168,
+        "is_tp_shardable_gate_up": true,
+        "is_tp_shardable_down_proj": true,
+        "tp_collective_type": "AllReduce"
+      }
+    }
+  },
+  "Gemma2-27B": {
+    "parameters": 27200000000,
+    "hidden_size": 4608,
+    "num_layers": 46,
+    "num_attention_heads": 32,
+    "num_kv_heads": 16,
+    "intermediate_size": 36864,
+    "vocab_size": 256000,
+    "prefill_op_stats": {
+      "flops_per_token": 54400000000,
+      "memory_bytes_per_token": 108800000
+    },
+    "decode_op_stats": {
+      "flops_per_token": 54400000000,
+      "memory_bytes_per_token": 217600000
+    },
+    "kv_cache_bytes_per_token_per_layer": 9216,
+    "layer_types": {
+      "attention": {
+        "flops_per_token_prefill": 1182608696,
+        "flops_per_token_decode": 1182608696,
+        "memory_bytes_per_token_prefill": 2365217,
+        "memory_bytes_per_token_decode": 4730435,
+        "activation_output_bytes_per_token": 9216,
+        "is_tp_shardable_qkv": true,
+        "is_tp_shardable_output_proj": true,
+        "tp_collective_type": "AllReduce"
+      },
+      "mlp": {
+        "flops_per_token_prefill": 1182608696,
+        "flops_per_token_decode": 1182608696,
+        "memory_bytes_per_token_prefill": 2365217,
+        "memory_bytes_per_token_decode": 4730435,
+        "activation_output_bytes_per_token": 9216,
         "is_tp_shardable_gate_up": true,
         "is_tp_shardable_down_proj": true,
         "tp_collective_type": "AllReduce"

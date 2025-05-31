@@ -116,7 +116,7 @@ frameworks_to_test:
   - name: "vllm_instance"
     type: "VLLM"
     config:
-      model_profile_id: "Llama2-7B"
+      model_profile_id: "Llama3-8B"  # Or choose from 15+ available models
       max_num_seqs: 256
 ```
 
@@ -251,11 +251,13 @@ The simulator uses a JSON database (`configs/model_params.json`) to store model-
 - Tensor parallelism sharding information
 
 Pre-configured models include:
-- Llama2-7B, 13B
-- Llama3-8B
-- Mistral-7B  
-- GPT-3-175B
-- LargeModel-100B (for testing large-scale parallelism)
+- **Llama Family**: Llama2-7B/13B, Llama3-8B/70B
+- **Qwen 2.5 Family**: 7B/32B/72B variants
+- **Mistral Family**: Mistral-7B-v0.3, Mixtral-8x7B (MoE)
+- **Gemma 2**: 9B/27B models
+- **GPT-3-175B**
+
+See [Model Library Documentation](docs/model_library.md) for detailed specifications.
 
 ## Development
 
@@ -299,12 +301,17 @@ Contributions are welcome! Please:
 
 ## Prefix Caching Support
 
-LLMPerfOracle now supports simulation of prefix caching (KV cache reuse) for conversational workloads:
+LLMPerfOracle supports advanced prefix caching simulation with two modes:
 
-### Benefits
-- Reduces prefill computation for requests sharing common prefixes
-- Improves TTFT for conversational follow-ups
-- More efficient memory usage through KV cache sharing
+### Conversational Prefix Caching (Phase 1)
+- Reuses KV cache within conversation sessions
+- 70%+ hit rates for multi-turn conversations
+- 98% TTFT improvement for cached requests
+
+### Cross-Request Prefix Caching (Phase 2)
+- Global cache for common prefixes across requests
+- Support for system prompts, few-shot examples
+- LRU eviction with configurable cache size
 
 ### Configuration
 ```yaml
@@ -312,16 +319,20 @@ frameworks_to_test:
   - name: "vllm_with_caching"
     type: "VLLM"
     config:
-      enable_prefix_caching: true  # Default: true
+      enable_prefix_caching: true        # Conversational caching
+      enable_cross_request_caching: true # Global prefix cache
+      max_prefix_cache_size: 100         # Max cached prefixes
+      min_prefix_cache_length: 50        # Min tokens to cache
 ```
 
 ### Metrics
-The simulation reports prefix caching statistics:
-- Overall and conversational hit rates
-- Prefill reduction ratio
-- Total tokens saved from caching
+The simulation reports comprehensive caching statistics:
+- Conversational and cross-request hit rates
+- Prefill computation reduction (30-70%)
+- Per-request token savings
+- Cache utilization metrics
 
-See `docs/prefix_caching_implementation.md` for detailed implementation notes.
+See `docs/prefix_caching_implementation.md` and `docs/prefix_caching_implementation_status.md` for details.
 
 ## Future Enhancements
 

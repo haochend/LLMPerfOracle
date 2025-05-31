@@ -35,6 +35,7 @@ The `design_documents/` directory contains the original design specifications th
 ### General Guides
 - **[Simulation Walkthrough](simulation_walkthrough.md)** - Step-by-step guide through a complete simulation
 - **[Hardware Efficiency](hardware_efficiency.md)** - Understanding MFU/MBU and hardware utilization
+- **[Model Library](model_library.md)** - Complete list of 15+ pre-configured models with specifications
 
 ### Parallelism Implementation
 - **[Parallelism Testing Guide](parallelism_testing_guide.md)** - Comprehensive guide to testing multi-GPU configurations
@@ -120,7 +121,8 @@ docs/
 ├── cross_request_caching_implementation.md  # Phase 2 implementation
 ├── workload_generator_enhancement.md  # Token accumulation feature
 ├── test_fixes_summary.md              # Test issue resolutions
-└── prefix_caching_implementation_status.md  # Document 8 implementation status
+├── prefix_caching_implementation_status.md  # Document 8 implementation status
+└── model_library.md                   # Complete model specifications
 ```
 
 ## 📊 Key Metrics and Results
