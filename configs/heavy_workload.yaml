@@ -1,0 +1,157 @@
+# Heavy Workload Configuration for GH200 Testing
+# Designed to stress compute, memory, and parallelism capabilities
+
+client_profiles:
+  # Profile 1: Large Document Processing (Compute-Heavy)
+  - profile_id: "doc_processor"
+    arrival_rate: 5.0  # requests per second
+    cv: 0.5  # coefficient of variation for arrival times
+    priority: 1  # highest priority
+    enable_session_kv_cache: false
+    session_profile:
+      max_turns: 1
+      turn_interval_seconds:
+        type: "constant"
+        value: 1.0
+    prompt_tokens:
+      type: "normal"
+      mean: 3000  # Very large prompts
+      std: 500
+      min: 2000
+      max: 4096
+    generated_tokens:
+      type: "normal"
+      mean: 500
+      std: 100
+      min: 200
+      max: 1000
+  
+  # Profile 2: Conversational AI with Long Context (Memory-Heavy)
+  - profile_id: "conversational_ai"
+    arrival_rate: 8.0
+    cv: 0.8
+    priority: 2
+    enable_session_kv_cache: true
+    session_profile:
+      max_turns: 10  # Multi-turn conversations
+      turn_interval_seconds:
+        type: "exponential"
+        mean: 2.0
+    prompt_tokens:
+      type: "uniform"
+      min: 500
+      max: 2000
+    generated_tokens:
+      type: "normal"
+      mean: 1500  # Long generations
+      std: 300
+      min: 1000
+      max: 2048
+  
+  # Profile 3: Code Generation (Balanced)
+  - profile_id: "code_gen"
+    arrival_rate: 10.0
+    cv: 0.6
+    priority: 2
+    enable_session_kv_cache: false
+    session_profile:
+      max_turns: 1
+      turn_interval_seconds:
+        type: "constant"
+        value: 1.0
+    prompt_tokens:
+      type: "normal"
+      mean: 1500
+      std: 300
+      min: 800
+      max: 2500
+    generated_tokens:
+      type: "normal"
+      mean: 800
+      std: 200
+      min: 400
+      max: 1500
+  
+  # Profile 4: Batch Inference (High Throughput)
+  - profile_id: "batch_inference"
+    arrival_rate: 15.0  # High rate
+    cv: 0.3  # More regular arrivals
+    priority: 3  # Lower priority
+    enable_session_kv_cache: false
+    session_profile:
+      max_turns: 1
+      turn_interval_seconds:
+        type: "constant"
+        value: 1.0
+    prompt_tokens:
+      type: "uniform"
+      min: 200
+      max: 800
+    generated_tokens:
+      type: "uniform"
+      min: 100
+      max: 400
+  
+  # Profile 5: Extreme Context Length (Stress Test)
+  - profile_id: "extreme_context"
+    arrival_rate: 2.0  # Lower rate due to resource intensity
+    cv: 1.0  # High variability
+    priority: 1
+    enable_session_kv_cache: true
+    session_profile:
+      max_turns: 5
+      turn_interval_seconds:
+        type: "normal"
+        mean: 3.0
+        std: 1.0
+    prompt_tokens:
+      type: "normal"
+      mean: 6000  # Extremely large prompts
+      std: 1000
+      min: 4000
+      max: 8192
+    generated_tokens:
+      type: "normal"
+      mean: 2000  # Long outputs
+      std: 400
+      min: 1500
+      max: 3000
+  
+  # Profile 6: Mixed Burst Traffic
+  - profile_id: "burst_traffic"
+    arrival_rate: 20.0  # Very high burst
+    cv: 1.5  # Highly variable (bursty)
+    priority: 2
+    enable_session_kv_cache: false
+    session_profile:
+      max_turns: 1
+      turn_interval_seconds:
+        type: "constant"
+        value: 1.0
+    prompt_tokens:
+      type: "exponential"
+      mean: 1000
+      min: 100
+      max: 3000
+    generated_tokens:
+      type: "exponential"
+      mean: 300
+      min: 50
+      max: 800
+
+# Enable all profiles to create a complex mixed workload
+active_profiles:
+  - "doc_processor"
+  - "conversational_ai"
+  - "code_gen"
+  - "batch_inference"
+  - "extreme_context"
+  - "burst_traffic"
+
+# Total simulation characteristics:
+# - Combined arrival rate: ~60 requests/second
+# - Mix of compute-heavy and memory-heavy workloads
+# - Various priority levels
+# - Both conversational and single-shot requests
+# - Extreme context lengths to test memory management
+# - Bursty traffic patterns to test scheduling

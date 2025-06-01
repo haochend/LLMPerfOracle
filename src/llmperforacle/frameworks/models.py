@@ -24,6 +24,11 @@ class SequenceState:
     prompt_tokens_fully_processed: int = 0  # Total prompt tokens with KV cache available
     kv_block_ids_for_prompt: List[Any] = field(default_factory=list)  # For detailed block tracking
     prefill_end_time_sim: Optional[float] = None  # For TTFT calculation when prefill is skipped
+    
+    # Chunked prefill fields
+    prefill_chunks_completed: int = 0  # Number of chunks already processed
+    total_prefill_chunks: int = 1  # Total chunks needed for this sequence
+    current_prefill_position: int = 0  # Current position in the prompt for chunked prefill
 
 
 @dataclass

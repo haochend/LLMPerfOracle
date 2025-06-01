@@ -167,7 +167,7 @@ class ExperimentOrchestrator:
         return instance
     
     def _create_target_frameworks_map(self) -> Dict[str, Any]:
-        """Create mapping of framework IDs to request queues."""
+        """Create mapping of framework IDs to request queues and entry devices."""
         target_map = {}
         
         for i, fw_instance in enumerate(self.llm_framework_instances):
@@ -178,8 +178,19 @@ class ExperimentOrchestrator:
             )
             
             if fw_config.get("is_target_for_workload", True):
-                # Use the framework's request arrival queue
-                target_map[fw_instance.framework_id] = fw_instance.request_arrival_queue
+                # Determine the entry device for this framework
+                if hasattr(fw_instance, 'primary_gpu_id'):
+                    entry_device = fw_instance.primary_gpu_id
+                elif hasattr(fw_instance, 'gpu_id'):
+                    entry_device = fw_instance.gpu_id
+                else:
+                    entry_device = fw_instance.gpu_ids[0] if fw_instance.gpu_ids else 'gpu0'
+                
+                # Store both queue and entry device
+                target_map[fw_instance.framework_id] = {
+                    'queue': fw_instance.request_arrival_queue,
+                    'entry_device': entry_device
+                }
         
         if not target_map:
             raise ValueError("No frameworks marked as workload targets")

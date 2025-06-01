@@ -1,6 +1,7 @@
 """vLLM framework simulation implementation."""
 
 import logging
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 import simpy
@@ -46,7 +47,17 @@ class VLLMFramework(AbstractLLMFramework):
         self.gpu_id = self.config.get("gpu_id", "gpu0")
         self.block_size = self.config.get("block_size", 16)
         self.max_running_sequences = self.config.get("max_num_seqs", 256)
-        self.max_batched_tokens_per_iteration = self.config.get("max_num_batched_tokens", 4096)
+        
+        # Dynamic batch size calculation
+        if "max_num_batched_tokens" in self.config:
+            self.max_batched_tokens_per_iteration = self.config["max_num_batched_tokens"]
+        else:
+            self.max_batched_tokens_per_iteration = self._calculate_dynamic_batch_size()
+        
+        # Chunked prefill configuration
+        self.enable_chunked_prefill = self.config.get("enable_chunked_prefill", True)
+        self.prefill_chunk_size = self.config.get("prefill_chunk_size", 
+                                                  min(4096, self.max_batched_tokens_per_iteration))
         
         # For TP, use primary GPU for scheduling but distribute computation
         if self.parallelism_strategy in ['TP', 'TP_PP']:
@@ -78,8 +89,85 @@ class VLLMFramework(AbstractLLMFramework):
             f"GPUs={self.gpu_ids if self.parallelism_strategy != 'None' else [self.gpu_id]}, "
             f"parallelism={self.parallelism_strategy}, "
             f"block_size={self.block_size}, "
-            f"max_seqs={self.max_running_sequences}"
+            f"max_seqs={self.max_running_sequences}, "
+            f"max_batched_tokens={self.max_batched_tokens_per_iteration}"
         )
+    
+    def _calculate_dynamic_batch_size(self) -> int:
+        """Calculate optimal max_num_batched_tokens based on hardware capabilities."""
+        # Get hardware specs
+        if self.parallelism_strategy in ['TP', 'TP_PP']:
+            # Use first GPU as representative
+            device_info = self.virtual_hardware.get_device_info(self.gpu_ids[0])
+        else:
+            device_info = self.virtual_hardware.get_device_info(self.gpu_id)
+            
+        if not device_info:
+            logger.warning("Could not get device info, using default batch size")
+            return 4096
+            
+        # Extract hardware capabilities
+        memory_gb = device_info.memory_capacity_bytes / 1e9
+        memory_bandwidth_gbs = device_info.memory_gbps
+        fp16_tflops = device_info.peak_tflops.get('fp16', 100)
+        
+        # Model characteristics
+        hidden_dim = self.model_profile.get('hidden_size', 4096)
+        num_layers = self.model_profile.get('num_layers', 32)
+        model_size_gb = self.model_profile.get('parameters', 7e9) * 2 / 1e9  # FP16
+        
+        # Adjust for parallelism
+        if self.parallelism_strategy == 'TP':
+            model_size_gb = model_size_gb / self.tp_degree
+            # Account for communication overhead
+            comm_scaling = min(math.sqrt(self.tp_degree), 4)
+        else:
+            comm_scaling = 1
+            
+        # Target iteration time (ms)
+        target_iteration_ms = 50
+        
+        # Calculate limits
+        
+        # 1. Memory limit for attention matrices and activations
+        # Reserve memory for model weights and KV cache
+        available_memory_gb = (memory_gb - model_size_gb) * 0.1  # 10% for activations
+        # Attention memory scales quadratically for prefill
+        # Approximate as sqrt to get token count
+        memory_limited = int(math.sqrt(available_memory_gb * 1e9 / (hidden_dim * 4)))
+        
+        # 2. Bandwidth limit
+        # Each token needs to read/write model weights and activations
+        bytes_per_token = hidden_dim * num_layers * 4  # Rough estimate
+        bandwidth_limited = int(
+            (memory_bandwidth_gbs * 1e9 * target_iteration_ms / 1000) / bytes_per_token
+        )
+        
+        # 3. Compute limit
+        flops_per_token = self.model_profile.get('prefill_op_stats', {}).get(
+            'flops_per_token', 2 * self.model_profile.get('parameters', 7e9)
+        )
+        if self.parallelism_strategy == 'TP':
+            # With TP, each GPU does less work per token
+            flops_per_token = flops_per_token / self.tp_degree
+        compute_limited = int(
+            (fp16_tflops * 1e12 * target_iteration_ms / 1000) / flops_per_token
+        )
+        
+        # Take minimum and apply scaling
+        base_limit = min(memory_limited, bandwidth_limited, compute_limited)
+        dynamic_limit = int(base_limit * comm_scaling)
+        
+        # Apply reasonable bounds
+        dynamic_limit = max(2048, min(dynamic_limit, 32768))
+        
+        logger.info(
+            f"Calculated dynamic batch size: {dynamic_limit} "
+            f"(memory_limited={memory_limited}, bandwidth_limited={bandwidth_limited}, "
+            f"compute_limited={compute_limited}, comm_scaling={comm_scaling})"
+        )
+        
+        return dynamic_limit
     
     def _init_kv_cache(self) -> None:
         """Initialize PagedAttention KV cache structures."""
@@ -200,7 +288,14 @@ class VLLMFramework(AbstractLLMFramework):
                     cached_prefix_length_used=cached_prefix_length,
                     num_tokens_requiring_prefill=num_tokens_to_prefill,
                     prompt_tokens_fully_processed=0,  # Will be updated after prefill
+                    current_prefill_position=cached_prefix_length,  # Start after cached prefix
                 )
+                
+                # Calculate total chunks needed for chunked prefill
+                if self.enable_chunked_prefill and num_tokens_to_prefill > self.prefill_chunk_size:
+                    seq_state.total_prefill_chunks = math.ceil(num_tokens_to_prefill / self.prefill_chunk_size)
+                else:
+                    seq_state.total_prefill_chunks = 1
                 
                 self.running_sequences[request.request_id] = seq_state
                 self.waiting_sequences.append(request)
@@ -234,16 +329,41 @@ class VLLMFramework(AbstractLLMFramework):
         for request in list(self.waiting_sequences):
             if request.request_id in self.running_sequences:
                 seq_state = self.running_sequences[request.request_id]
-                if seq_state.status == "WAITING_FOR_PREFILL":
-                    # Use actual tokens requiring prefill, not total prompt tokens
-                    tokens_for_prefill = seq_state.num_tokens_requiring_prefill
-                    if (current_batched_tokens + tokens_for_prefill) <= self.max_batched_tokens_per_iteration:
-                        prefill_batch.append(seq_state)
-                        current_batched_tokens += tokens_for_prefill
+                if seq_state.status == "WAITING_FOR_PREFILL" or seq_state.status == "PREFILLING":
+                    # Calculate tokens for this iteration (considering chunking)
+                    remaining_tokens = seq_state.num_tokens_requiring_prefill - (
+                        seq_state.prefill_chunks_completed * self.prefill_chunk_size
+                    )
+                    
+                    if remaining_tokens <= 0:
+                        # Prefill already complete, move to decoding
+                        seq_state.status = "DECODING"
                         self.waiting_sequences.remove(request)
-                        seq_state.status = "PREFILLING"
+                        continue
+                    
+                    # Determine chunk size for this iteration
+                    if self.enable_chunked_prefill:
+                        tokens_this_chunk = min(
+                            remaining_tokens,
+                            self.prefill_chunk_size,
+                            self.max_batched_tokens_per_iteration - current_batched_tokens
+                        )
                     else:
-                        break
+                        tokens_this_chunk = remaining_tokens
+                    
+                    # Check if we can fit this chunk
+                    if tokens_this_chunk > 0 and (current_batched_tokens + tokens_this_chunk) <= self.max_batched_tokens_per_iteration:
+                        prefill_batch.append(seq_state)
+                        current_batched_tokens += tokens_this_chunk
+                        seq_state.status = "PREFILLING"
+                        # Don't remove from waiting_sequences if more chunks needed
+                        if seq_state.prefill_chunks_completed + 1 >= seq_state.total_prefill_chunks:
+                            self.waiting_sequences.remove(request)
+                    else:
+                        # Can't fit even a small chunk, try next request
+                        if not self.enable_chunked_prefill:
+                            break  # If no chunking, stop here
+                        # With chunking, continue to check other requests
         
         return prefill_batch, decode_batch
     
@@ -252,28 +372,39 @@ class VLLMFramework(AbstractLLMFramework):
         prefill_processes = []
         
         for seq_state in prefill_batch:
-            if seq_state.num_tokens_requiring_prefill > 0:
-                # Log prefill start with actual tokens to prefill
-                self.metrics_collector.log_prefill_start(
-                    seq_state.request.request_id, 
-                    self.simpy_env.now,
-                    seq_state.num_tokens_requiring_prefill
-                )
-                seq_state.prefill_start_time = self.simpy_env.now
+            # Calculate tokens for this chunk
+            remaining_tokens = seq_state.num_tokens_requiring_prefill - (
+                seq_state.prefill_chunks_completed * self.prefill_chunk_size
+            )
+            
+            if self.enable_chunked_prefill:
+                tokens_this_chunk = min(remaining_tokens, self.prefill_chunk_size)
+            else:
+                tokens_this_chunk = remaining_tokens
+                
+            if tokens_this_chunk > 0:
+                # Log prefill start only for first chunk
+                if seq_state.prefill_chunks_completed == 0:
+                    self.metrics_collector.log_prefill_start(
+                        seq_state.request.request_id, 
+                        self.simpy_env.now,
+                        seq_state.num_tokens_requiring_prefill
+                    )
+                    seq_state.prefill_start_time = self.simpy_env.now
                 
                 if self.parallelism_strategy in ['TP', 'TP_PP']:
                     # Execute prefill with tensor parallelism
                     prefill_proc = self._execute_tp_prefill(
-                        seq_state.num_tokens_requiring_prefill,  # Use actual tokens to prefill
+                        tokens_this_chunk,
                         seq_state.request.request_id
                     )
                 else:
                     # Regular single-GPU prefill
                     task_desc = self._estimate_prefill_ops(
-                        seq_state.num_tokens_requiring_prefill,  # Use actual tokens to prefill
+                        tokens_this_chunk,
                         batch_size=1
                     )
-                    task_desc["task_id"] = f"{seq_state.request.request_id}_prefill"
+                    task_desc["task_id"] = f"{seq_state.request.request_id}_prefill_chunk_{seq_state.prefill_chunks_completed}"
                     prefill_proc = self.virtual_hardware.submit_computation_task(self.gpu_id, task_desc)
                 
                 prefill_processes.append(prefill_proc)
@@ -298,12 +429,37 @@ class VLLMFramework(AbstractLLMFramework):
         # Update sequence states
         for seq_state in prefill_batch:
             if seq_state.request.request_id in self.running_sequences:
-                seq_state.status = "DECODING"
-                # Update tokens processed to include both cached and newly prefilled
-                seq_state.prompt_tokens_processed = seq_state.request.prompt_num_tokens
-                seq_state.prompt_tokens_fully_processed = (
-                    seq_state.cached_prefix_length_used + seq_state.num_tokens_requiring_prefill
-                )
+                # Update chunk progress
+                seq_state.prefill_chunks_completed += 1
+                
+                # Update prefill position
+                if self.enable_chunked_prefill:
+                    tokens_processed_this_iter = min(
+                        self.prefill_chunk_size,
+                        seq_state.num_tokens_requiring_prefill - 
+                        (seq_state.prefill_chunks_completed - 1) * self.prefill_chunk_size
+                    )
+                    seq_state.current_prefill_position += tokens_processed_this_iter
+                else:
+                    seq_state.current_prefill_position = (
+                        seq_state.cached_prefix_length_used + seq_state.num_tokens_requiring_prefill
+                    )
+                
+                # Check if prefill is complete
+                if seq_state.prefill_chunks_completed >= seq_state.total_prefill_chunks:
+                    seq_state.status = "DECODING"
+                    # Update tokens processed to include both cached and newly prefilled
+                    seq_state.prompt_tokens_processed = seq_state.request.prompt_num_tokens
+                    seq_state.prompt_tokens_fully_processed = (
+                        seq_state.cached_prefix_length_used + seq_state.num_tokens_requiring_prefill
+                    )
+                    seq_state.prefill_end_time_sim = self.simpy_env.now
+                else:
+                    # More chunks needed, keep in PREFILLING state
+                    seq_state.status = "WAITING_FOR_PREFILL"
+                    # Re-add to waiting queue if not already there
+                    if seq_state.request not in self.waiting_sequences:
+                        self.waiting_sequences.append(seq_state.request)
     
     def _execute_decode_batch(self, decode_batch: List[SequenceState]) -> None:
         """Execute one decode step for a batch of sequences."""

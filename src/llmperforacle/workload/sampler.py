@@ -61,12 +61,10 @@ class DistributionSampler:
             
             elif dist_type == "LogNormal":
                 # Parameters are for the underlying normal distribution
+                # mean and sigma are the parameters of the log-space normal distribution
                 mean = distribution_config.get("mean", 0.0)
                 sigma = distribution_config.get("sigma", 1.0)
-                # Convert to log-space parameters
-                log_mean = np.log(mean**2 / np.sqrt(mean**2 + sigma**2))
-                log_sigma = np.sqrt(np.log(1 + (sigma**2 / mean**2)))
-                value = np.random.lognormal(log_mean, log_sigma)
+                value = np.random.lognormal(mean, sigma)
             
             elif dist_type == "Pareto":
                 shape = distribution_config.get("shape", 1.0)  # alpha parameter

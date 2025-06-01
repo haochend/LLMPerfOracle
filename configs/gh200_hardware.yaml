@@ -1,0 +1,315 @@
+# NVIDIA GH200 Grace Hopper Superchip Hardware Configuration
+# 576GB HBM3e @ 4.8TB/s, 132 SM Hopper GPU + 72-core Grace CPU
+
+compute_devices:
+  # Primary GH200 chips
+  - device_id: "gh200_0"
+    device_type: "GPU"
+    memory_capacity_gb: 576.0  # HBM3e memory
+    memory_bandwidth_gb_s: 4800.0  # 4.8 TB/s HBM3e bandwidth
+    fp16_tflops: 1979.0  # With sparsity
+    fp32_tflops: 134.0
+    fp64_tflops: 67.0
+    network_bandwidth_gb_s: 900.0  # NVLink-C2C bandwidth
+    
+  - device_id: "gh200_1"
+    device_type: "GPU"
+    memory_capacity_gb: 576.0
+    memory_bandwidth_gb_s: 4800.0
+    fp16_tflops: 1979.0
+    fp32_tflops: 134.0
+    fp64_tflops: 67.0
+    network_bandwidth_gb_s: 900.0
+    
+  - device_id: "gh200_2"
+    device_type: "GPU"
+    memory_capacity_gb: 576.0
+    memory_bandwidth_gb_s: 4800.0
+    fp16_tflops: 1979.0
+    fp32_tflops: 134.0
+    fp64_tflops: 67.0
+    network_bandwidth_gb_s: 900.0
+    
+  - device_id: "gh200_3"
+    device_type: "GPU"
+    memory_capacity_gb: 576.0
+    memory_bandwidth_gb_s: 4800.0
+    fp16_tflops: 1979.0
+    fp32_tflops: 134.0
+    fp64_tflops: 67.0
+    network_bandwidth_gb_s: 900.0
+    
+  - device_id: "gh200_4"
+    device_type: "GPU"
+    memory_capacity_gb: 576.0
+    memory_bandwidth_gb_s: 4800.0
+    fp16_tflops: 1979.0
+    fp32_tflops: 134.0
+    fp64_tflops: 67.0
+    network_bandwidth_gb_s: 900.0
+    
+  - device_id: "gh200_5"
+    device_type: "GPU"
+    memory_capacity_gb: 576.0
+    memory_bandwidth_gb_s: 4800.0
+    fp16_tflops: 1979.0
+    fp32_tflops: 134.0
+    fp64_tflops: 67.0
+    network_bandwidth_gb_s: 900.0
+    
+  - device_id: "gh200_6"
+    device_type: "GPU"
+    memory_capacity_gb: 576.0
+    memory_bandwidth_gb_s: 4800.0
+    fp16_tflops: 1979.0
+    fp32_tflops: 134.0
+    fp64_tflops: 67.0
+    network_bandwidth_gb_s: 900.0
+    
+  - device_id: "gh200_7"
+    device_type: "GPU"
+    memory_capacity_gb: 576.0
+    memory_bandwidth_gb_s: 4800.0
+    fp16_tflops: 1979.0
+    fp32_tflops: 134.0
+    fp64_tflops: 67.0
+    network_bandwidth_gb_s: 900.0
+    
+  # Client node for workload generation
+  - device_id: "client_node_0"
+    device_type: "CPU"
+    memory_capacity_gb: 128.0
+    memory_bandwidth_gb_s: 200.0
+    fp16_tflops: 0.5
+    fp32_tflops: 0.5
+    fp64_tflops: 0.5
+    network_bandwidth_gb_s: 100.0
+
+# NVLink network topology for GH200s
+network_links:
+  # Client to framework entry points
+  - link_id: "client_to_framework_0"
+    source_id: "client_node_0"
+    dest_id: "gh200_0"
+    bandwidth_gb_s: 100.0
+    latency_ms: 0.5
+    bidirectional: true
+    
+  - link_id: "client_to_framework_1"
+    source_id: "client_node_0"
+    dest_id: "gh200_1"
+    bandwidth_gb_s: 100.0
+    latency_ms: 0.5
+    bidirectional: true
+    
+  - link_id: "client_to_framework_2"
+    source_id: "client_node_0"
+    dest_id: "gh200_2"
+    bandwidth_gb_s: 100.0
+    latency_ms: 0.5
+    bidirectional: true
+    
+  - link_id: "client_to_framework_3"
+    source_id: "client_node_0"
+    dest_id: "gh200_3"
+    bandwidth_gb_s: 100.0
+    latency_ms: 0.5
+    bidirectional: true
+    
+  # High-speed NVLink connections between GH200s
+  # Full mesh topology for 8 GPUs
+  - link_id: "nvlink_0_1"
+    source_id: "gh200_0"
+    dest_id: "gh200_1"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_0_2"
+    source_id: "gh200_0"
+    dest_id: "gh200_2"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_0_3"
+    source_id: "gh200_0"
+    dest_id: "gh200_3"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_0_4"
+    source_id: "gh200_0"
+    dest_id: "gh200_4"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_0_5"
+    source_id: "gh200_0"
+    dest_id: "gh200_5"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_0_6"
+    source_id: "gh200_0"
+    dest_id: "gh200_6"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_0_7"
+    source_id: "gh200_0"
+    dest_id: "gh200_7"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_1_2"
+    source_id: "gh200_1"
+    dest_id: "gh200_2"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_1_3"
+    source_id: "gh200_1"
+    dest_id: "gh200_3"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_1_4"
+    source_id: "gh200_1"
+    dest_id: "gh200_4"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_1_5"
+    source_id: "gh200_1"
+    dest_id: "gh200_5"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_1_6"
+    source_id: "gh200_1"
+    dest_id: "gh200_6"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_1_7"
+    source_id: "gh200_1"
+    dest_id: "gh200_7"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_2_3"
+    source_id: "gh200_2"
+    dest_id: "gh200_3"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_2_4"
+    source_id: "gh200_2"
+    dest_id: "gh200_4"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_2_5"
+    source_id: "gh200_2"
+    dest_id: "gh200_5"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_2_6"
+    source_id: "gh200_2"
+    dest_id: "gh200_6"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_2_7"
+    source_id: "gh200_2"
+    dest_id: "gh200_7"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_3_4"
+    source_id: "gh200_3"
+    dest_id: "gh200_4"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_3_5"
+    source_id: "gh200_3"
+    dest_id: "gh200_5"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_3_6"
+    source_id: "gh200_3"
+    dest_id: "gh200_6"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_3_7"
+    source_id: "gh200_3"
+    dest_id: "gh200_7"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_4_5"
+    source_id: "gh200_4"
+    dest_id: "gh200_5"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_4_6"
+    source_id: "gh200_4"
+    dest_id: "gh200_6"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_4_7"
+    source_id: "gh200_4"
+    dest_id: "gh200_7"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_5_6"
+    source_id: "gh200_5"
+    dest_id: "gh200_6"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_5_7"
+    source_id: "gh200_5"
+    dest_id: "gh200_7"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true
+    
+  - link_id: "nvlink_6_7"
+    source_id: "gh200_6"
+    dest_id: "gh200_7"
+    bandwidth_gb_s: 900.0
+    latency_ms: 0.001
+    bidirectional: true

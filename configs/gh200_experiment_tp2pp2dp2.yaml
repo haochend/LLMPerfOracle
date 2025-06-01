@@ -1,0 +1,442 @@
+simulation:
+  max_simulation_time: 300
+  random_seed: 42
+model_characteristics_db_path: configs/model_params.json
+hardware_profile:
+  compute_devices:
+  - device_id: gh200_0
+    device_type: GPU
+    memory_capacity_bytes: 576000000000
+    memory_gbps: 4800.0
+    peak_tflops:
+      fp16: 1979.0
+    processing_units: 132
+  - device_id: gh200_1
+    device_type: GPU
+    memory_capacity_bytes: 576000000000
+    memory_gbps: 4800.0
+    peak_tflops:
+      fp16: 1979.0
+    processing_units: 132
+  - device_id: gh200_2
+    device_type: GPU
+    memory_capacity_bytes: 576000000000
+    memory_gbps: 4800.0
+    peak_tflops:
+      fp16: 1979.0
+    processing_units: 132
+  - device_id: gh200_3
+    device_type: GPU
+    memory_capacity_bytes: 576000000000
+    memory_gbps: 4800.0
+    peak_tflops:
+      fp16: 1979.0
+    processing_units: 132
+  - device_id: gh200_4
+    device_type: GPU
+    memory_capacity_bytes: 576000000000
+    memory_gbps: 4800.0
+    peak_tflops:
+      fp16: 1979.0
+    processing_units: 132
+  - device_id: gh200_5
+    device_type: GPU
+    memory_capacity_bytes: 576000000000
+    memory_gbps: 4800.0
+    peak_tflops:
+      fp16: 1979.0
+    processing_units: 132
+  - device_id: gh200_6
+    device_type: GPU
+    memory_capacity_bytes: 576000000000
+    memory_gbps: 4800.0
+    peak_tflops:
+      fp16: 1979.0
+    processing_units: 132
+  - device_id: gh200_7
+    device_type: GPU
+    memory_capacity_bytes: 576000000000
+    memory_gbps: 4800.0
+    peak_tflops:
+      fp16: 1979.0
+    processing_units: 132
+  - device_id: client_node_0
+    device_type: CPU
+    memory_capacity_bytes: 128000000000
+    memory_gbps: 200.0
+    peak_tflops:
+      fp16: 0.5
+    processing_units: 1
+  network_links:
+  - link_id: client_to_framework_0
+    source_id: client_node_0
+    dest_id: gh200_0
+    bidirectional: true
+    bandwidth_bps: 100000000000
+    latency_s: 0.0005
+  - link_id: client_to_framework_1
+    source_id: client_node_0
+    dest_id: gh200_1
+    bidirectional: true
+    bandwidth_bps: 100000000000
+    latency_s: 0.0005
+  - link_id: client_to_framework_2
+    source_id: client_node_0
+    dest_id: gh200_2
+    bidirectional: true
+    bandwidth_bps: 100000000000
+    latency_s: 0.0005
+  - link_id: client_to_framework_3
+    source_id: client_node_0
+    dest_id: gh200_3
+    bidirectional: true
+    bandwidth_bps: 100000000000
+    latency_s: 0.0005
+  - link_id: nvlink_0_1
+    source_id: gh200_0
+    dest_id: gh200_1
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_0_2
+    source_id: gh200_0
+    dest_id: gh200_2
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_0_3
+    source_id: gh200_0
+    dest_id: gh200_3
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_0_4
+    source_id: gh200_0
+    dest_id: gh200_4
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_0_5
+    source_id: gh200_0
+    dest_id: gh200_5
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_0_6
+    source_id: gh200_0
+    dest_id: gh200_6
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_0_7
+    source_id: gh200_0
+    dest_id: gh200_7
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_1_2
+    source_id: gh200_1
+    dest_id: gh200_2
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_1_3
+    source_id: gh200_1
+    dest_id: gh200_3
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_1_4
+    source_id: gh200_1
+    dest_id: gh200_4
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_1_5
+    source_id: gh200_1
+    dest_id: gh200_5
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_1_6
+    source_id: gh200_1
+    dest_id: gh200_6
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_1_7
+    source_id: gh200_1
+    dest_id: gh200_7
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_2_3
+    source_id: gh200_2
+    dest_id: gh200_3
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_2_4
+    source_id: gh200_2
+    dest_id: gh200_4
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_2_5
+    source_id: gh200_2
+    dest_id: gh200_5
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_2_6
+    source_id: gh200_2
+    dest_id: gh200_6
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_2_7
+    source_id: gh200_2
+    dest_id: gh200_7
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_3_4
+    source_id: gh200_3
+    dest_id: gh200_4
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_3_5
+    source_id: gh200_3
+    dest_id: gh200_5
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_3_6
+    source_id: gh200_3
+    dest_id: gh200_6
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_3_7
+    source_id: gh200_3
+    dest_id: gh200_7
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_4_5
+    source_id: gh200_4
+    dest_id: gh200_5
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_4_6
+    source_id: gh200_4
+    dest_id: gh200_6
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_4_7
+    source_id: gh200_4
+    dest_id: gh200_7
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_5_6
+    source_id: gh200_5
+    dest_id: gh200_6
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_5_7
+    source_id: gh200_5
+    dest_id: gh200_7
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+  - link_id: nvlink_6_7
+    source_id: gh200_6
+    dest_id: gh200_7
+    bidirectional: true
+    bandwidth_bps: 900000000000
+    latency_s: 1.0e-06
+workload:
+  total_duration: 300
+  bytes_per_token_estimate_for_network: 2
+  random_seed: 123
+  max_turns_per_session: 10
+  client_profiles:
+  - profile_name: doc_processor
+    weight: 0.0833
+    inter_arrival_time_dist_config:
+      type: Exponential
+      rate: 5.0
+    prompt_tokens_dist_config:
+      type: LogNormal
+      mean: 7.9
+      sigma: 0.17
+      is_int: true
+    max_output_tokens_dist_config:
+      type: LogNormal
+      mean: 6.1
+      sigma: 0.2
+      is_int: true
+    conversational_probability: 0.0
+    streaming_response_probability: 0.5
+  - profile_name: conversational_ai
+    weight: 0.1333
+    inter_arrival_time_dist_config:
+      type: Exponential
+      rate: 8.0
+    prompt_tokens_dist_config:
+      type: Uniform
+      low: 500
+      high: 2000
+      is_int: true
+    max_output_tokens_dist_config:
+      type: LogNormal
+      mean: 7.3
+      sigma: 0.2
+      is_int: true
+    conversational_probability: 0.8
+    streaming_response_probability: 0.5
+    follow_up_inter_arrival_time_dist_config:
+      type: Exponential
+      rate: 0.5
+  - profile_name: code_gen
+    weight: 0.1667
+    inter_arrival_time_dist_config:
+      type: Exponential
+      rate: 10.0
+    prompt_tokens_dist_config:
+      type: LogNormal
+      mean: 7.3
+      sigma: 0.2
+      is_int: true
+    max_output_tokens_dist_config:
+      type: LogNormal
+      mean: 6.7
+      sigma: 0.25
+      is_int: true
+    conversational_probability: 0.0
+    streaming_response_probability: 0.5
+  - profile_name: batch_inference
+    weight: 0.25
+    inter_arrival_time_dist_config:
+      type: Exponential
+      rate: 15.0
+    prompt_tokens_dist_config:
+      type: Uniform
+      low: 200
+      high: 800
+      is_int: true
+    max_output_tokens_dist_config:
+      type: Uniform
+      low: 100
+      high: 400
+      is_int: true
+    conversational_probability: 0.0
+    streaming_response_probability: 0.5
+  - profile_name: extreme_context
+    weight: 0.0333
+    inter_arrival_time_dist_config:
+      type: Exponential
+      rate: 2.0
+    prompt_tokens_dist_config:
+      type: LogNormal
+      mean: 8.7
+      sigma: 0.17
+      is_int: true
+    max_output_tokens_dist_config:
+      type: LogNormal
+      mean: 7.6
+      sigma: 0.2
+      is_int: true
+    conversational_probability: 0.8
+    streaming_response_probability: 0.5
+    follow_up_inter_arrival_time_dist_config:
+      type: LogNormal
+      mean: 1.1
+      sigma: 0.33
+  - profile_name: burst_traffic
+    weight: 0.3333
+    inter_arrival_time_dist_config:
+      type: Exponential
+      rate: 20.0
+    prompt_tokens_dist_config:
+      type: Exponential
+      rate: 0.001
+      is_int: true
+    max_output_tokens_dist_config:
+      type: Exponential
+      rate: 0.0033
+      is_int: true
+    conversational_probability: 0.0
+    streaming_response_probability: 0.5
+frameworks_to_test:
+- type: ParallelVLLM
+  name: vllm_full_0
+  is_target_for_workload: true
+  config:
+    model_profile_id: Llama3-70B
+    gpu_id: gh200_0
+    max_num_seqs: 384
+    block_size: 16
+    enable_prefix_caching: true
+    enable_chunked_prefill: true
+    prefill_chunk_size: 4096
+    scheduling_policy: fcfs
+    microbatch_size: 12
+    data_parallel_group: dp_group_full
+    data_parallel_size: 2
+    data_parallel_rank: 0
+    scheduler_iteration_delay_s: 0.0001
+    bytes_per_token_estimate_for_network: 2
+    parallelism:
+      strategy: TP_PP
+      gpu_ids:
+      - gh200_0
+      - gh200_1
+      - gh200_2
+      - gh200_3
+      tp_degree: 2
+      pp_stages: 2
+      num_microbatches_per_request: 4
+- type: ParallelVLLM
+  name: vllm_full_1
+  is_target_for_workload: true
+  config:
+    model_profile_id: Llama3-70B
+    gpu_id: gh200_4
+    max_num_seqs: 384
+    block_size: 16
+    enable_prefix_caching: true
+    enable_chunked_prefill: true
+    prefill_chunk_size: 4096
+    scheduling_policy: fcfs
+    microbatch_size: 12
+    data_parallel_group: dp_group_full
+    data_parallel_size: 2
+    data_parallel_rank: 1
+    scheduler_iteration_delay_s: 0.0001
+    bytes_per_token_estimate_for_network: 2
+    parallelism:
+      strategy: TP_PP
+      gpu_ids:
+      - gh200_4
+      - gh200_5
+      - gh200_6
+      - gh200_7
+      tp_degree: 2
+      pp_stages: 2
+      num_microbatches_per_request: 4
+metrics_config:
+  log_level: INFO
+  output_summary_json_path: experiments/results/gh200_tp2pp2dp2/summary.json
+  output_requests_csv_path: experiments/results/gh200_tp2pp2dp2/requests.csv
+  percentiles_to_calculate:
+  - 0.5
+  - 0.9
+  - 0.95
+  - 0.99
+  warm_up_duration_s: 60

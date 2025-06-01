@@ -227,21 +227,30 @@ class WorkloadGenerator:
     
     def _dispatch_request(self, request: Request) -> simpy.events.Event:
         """Dispatch a request to the target framework, including network simulation."""
-        # Simulate network transfer of prompt
-        prompt_data_size = request.prompt_num_tokens * self.bytes_per_token
-        
-        # Simulate client-to-server network transfer
-        yield self.hardware_platform.submit_network_transfer_task(
-            "client_node_0", "framework_entry_0", prompt_data_size
-        )
-        
         # Select target framework based on load balancing strategy
         target_fw_id = self._select_target_framework(request)
         if not target_fw_id:
             logger.error("No target frameworks available")
             return
         
-        target = self.target_frameworks_map[target_fw_id]
+        target_info = self.target_frameworks_map[target_fw_id]
+        
+        # Handle both old (queue only) and new (dict with queue and entry_device) formats
+        if isinstance(target_info, dict):
+            target = target_info['queue']
+            entry_device = target_info.get('entry_device', 'framework_entry_0')
+        else:
+            # Backward compatibility: target_info is the queue directly
+            target = target_info
+            entry_device = 'framework_entry_0'
+        
+        # Simulate network transfer of prompt
+        prompt_data_size = request.prompt_num_tokens * self.bytes_per_token
+        
+        # Simulate client-to-server network transfer to the actual entry device
+        yield self.hardware_platform.submit_network_transfer_task(
+            "client_node_0", entry_device, prompt_data_size
+        )
         
         # Log request arrival
         self.metrics_collector.log_request_arrival(
