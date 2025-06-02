@@ -27,12 +27,12 @@ class TestConfigurationRegression:
     """Test all example configurations are valid."""
     
     @pytest.mark.parametrize("config_file", [
-        "configs/example_experiment.yaml",
-        "configs/walkthrough_example.yaml",
-        "configs/example_parallel_experiment.yaml",
-        "configs/example_prefix_caching.yaml",
-        "configs/example_cross_request_caching.yaml",
-        "configs/test_parallel_quick.yaml",
+        "configs/examples/example_experiment.yaml",
+        "configs/examples/walkthrough_example.yaml",
+        "configs/examples/example_parallel_experiment.yaml",
+        "configs/examples/example_prefix_caching.yaml",
+        "configs/examples/example_cross_request_caching.yaml",
+        "configs/examples/test_parallel_quick.yaml",
     ])
     def test_example_configs_valid(self, config_file):
         """Test that all example configurations are valid."""
