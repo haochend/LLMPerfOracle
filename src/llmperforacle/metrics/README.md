@@ -25,6 +25,8 @@ Stores comprehensive metrics for each request:
 - Token counts: prompt, requested output, actual output
 - Status: SUCCESS, FAILURE_OOM_KV, FAILURE_TIMEOUT, ABORTED
 - Calculated metrics: TTFT, TPOT, E2E latency
+- Prefix caching metrics: cache hits, cached tokens, computation savings
+- Chunked prefill metrics: number of chunks, chunk processing times
 
 ### TimePointMetric
 
@@ -39,6 +41,13 @@ Records time-series data for resource utilization:
 - **Time to First Token (TTFT)**: Time from request arrival/prefill to first token
 - **Time Per Output Token (TPOT)**: Average time between tokens after the first
 - **End-to-End Latency**: Total request processing time
+
+### Prefix Caching Metrics
+- **Cache Hit Rate**: Percentage of requests with prefix cache hits
+- **Conversational Hit Rate**: Hit rate for multi-turn conversations
+- **Cross-Request Hit Rate**: Hit rate for shared prefixes
+- **Tokens Saved**: Number of tokens skipped due to caching
+- **Computation Reduction**: Percentage of prefill work avoided
 
 ### Throughput Metrics
 - **Requests Per Second (RPS)**: Successfully completed requests
@@ -58,6 +67,13 @@ metrics.log_prefill_start(request_id, start_time)
 metrics.log_first_token_generated(request_id, time, prefill_start)
 metrics.log_token_decoded(request_id, time, token_count)
 metrics.log_request_completed(request_id, time, tokens, status)
+
+# Prefix caching
+metrics.log_prefix_cache_event(request_id, event_type, cached_tokens, ...)
+# Event types: MISS_FULL, CONVERSATIONAL_HIT, CROSS_REQUEST_HIT
+
+# Chunked prefill
+metrics.log_chunked_prefill_progress(request_id, chunk_num, tokens_processed)
 
 # Resource tracking
 metrics.log_kv_cache_usage(framework_id, time, used, total)
@@ -91,6 +107,13 @@ metrics.log_gpu_task_end(gpu_id, time, task_id)
       "p90": 89.1,
       "p99": 156.3
     }
+  },
+  "prefix_caching": {
+    "overall_hit_rate": 0.71,
+    "conversational_hit_rate": 0.94,
+    "cross_request_hit_rate": 0.52,
+    "tokens_saved": 171000,
+    "prefill_computation_reduction": 0.69
   }
 }
 ```

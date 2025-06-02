@@ -18,11 +18,12 @@ The Experiment Orchestrator is the main entry point that:
 The central coordinator for simulation experiments.
 
 **Key Responsibilities:**
-- Configuration parsing and validation
+- Configuration parsing and validation (using ExperimentConfigValidator)
 - Component initialization in correct order
 - Framework instance creation
 - Simulation execution management
 - Result collection and reporting
+- Memory validation to prevent invalid configurations
 
 ## Configuration Structure
 
@@ -106,6 +107,7 @@ New frameworks are registered in `FRAMEWORK_CLASS_MAP`:
 ```python
 FRAMEWORK_CLASS_MAP = {
     "VLLM": VLLMFramework,
+    "ParallelVLLM": ParallelVLLMFramework,
     "TRTLLM": TRTLLMFramework,  # Future
     "SGLang": SGLangFramework,  # Future
     # Add new frameworks here

@@ -17,6 +17,8 @@ The main class managing all virtual hardware devices and providing resource requ
 - Simulates network links with bandwidth and latency
 - Tracks resource contention using SimPy resources
 - Provides parametric cost models for operation timing
+- Supports Level of Detail (LoD) for simulation speedup
+- Accurate modeling of collective operations (AllReduce, AllGather)
 
 ### VirtualComputeDevice
 

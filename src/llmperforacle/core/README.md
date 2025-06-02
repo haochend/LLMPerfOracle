@@ -17,6 +17,7 @@ The main class that manages the simulation lifecycle.
 - Manages global simulation state and configuration
 - Provides controlled execution with configurable time limits
 - Handles random seed setting for reproducible simulations
+- Supports configurable Level of Detail (LoD) for performance abstractions
 
 **Usage:**
 ```python
@@ -24,7 +25,8 @@ from llmperforacle.core import SimulationEnvironment
 
 config = {
     "max_simulation_time": 300,  # 5 minutes
-    "random_seed": 42
+    "random_seed": 42,
+    "lod": "medium"  # Level of Detail: "high" or "medium"
 }
 
 sim_env = SimulationEnvironment(config)
@@ -44,6 +46,24 @@ sim_env.run()
 The simulation engine accepts these configuration parameters:
 - `max_simulation_time`: Maximum simulation duration in seconds
 - `random_seed`: Optional seed for reproducibility
+- `lod`: Level of Detail ("high" or "medium") for simulation fidelity
+
+## Performance Abstractions
+
+The simulation engine implements Level of Detail (LoD) from Document 9:
+
+**High LoD (Default):**
+- Detailed layer-by-layer simulation
+- Individual operations for each transformer layer
+- Maximum accuracy for research and validation
+
+**Medium LoD:**
+- Aggregated operations for faster simulation
+- Single event for entire model forward pass
+- 5-20x speedup while maintaining accuracy
+- Ideal for large-scale experiments
+
+The LoD setting is propagated to all simulation components through environment metadata.
 
 ## Dependencies
 

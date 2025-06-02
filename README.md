@@ -10,6 +10,57 @@ LLMPerfOracle is a discrete-event simulation platform designed to evaluate and c
 - **Realistic workload generation**: Model production-like request patterns including bursty arrivals and conversational contexts
 - **Framework-specific modeling**: Accurate simulation of batching strategies, KV cache management, and scheduling policies
 - **Comprehensive metrics**: Track latency (TTFT, TPOT), throughput, and resource utilization
+- **Performance abstractions**: Configurable Level of Detail (LoD) for faster simulations
+- **Advanced features**: Chunked prefill, prefix caching, configuration validation
+
+## Key Features
+
+### Performance Abstractions (Level of Detail)
+
+LLMPerfOracle implements configurable Level of Detail (LoD) from Document 9 to enable faster simulations:
+
+```yaml
+simulation:
+  lod: "medium"  # Options: "high" (detailed) or "medium" (faster)
+```
+
+- **High LoD**: Detailed layer-by-layer simulation for accuracy
+- **Medium LoD**: Aggregated operations for 5-20x faster simulations
+- Maintains accuracy while reducing simulation time
+- Particularly effective with parallelism strategies (TP, PP)
+
+### Chunked Prefill
+
+Handles large prompts that exceed maximum batch size:
+
+```yaml
+frameworks_to_test:
+  - name: "vllm_chunked"
+    type: "VLLM"
+    config:
+      enable_chunked_prefill: true
+      prefill_chunk_size: 4096  # Process large prompts in chunks
+```
+
+- Automatically splits large prompts into manageable chunks
+- Enables processing of prompts with 10,000+ tokens
+- Dynamic batch size calculation based on hardware capabilities
+- Essential for heavy workloads with large context windows
+
+### Configuration Validation
+
+Built-in validation system ensures configurations are correct before running:
+
+```python
+from llmperforacle.utils.config_validator import ExperimentConfigValidator
+
+is_valid, errors = ExperimentConfigValidator.validate(config)
+```
+
+- Validates hardware configurations
+- Checks model compatibility
+- Ensures network topology is complete
+- Prevents common configuration mistakes
 
 ## Installation
 
@@ -263,12 +314,45 @@ See [Model Library Documentation](docs/model_library.md) for detailed specificat
 
 ### Running Tests
 
+#### Regression Test Suite (Recommended)
+
+The project includes a comprehensive regression test suite that ensures all functionality works correctly:
+
 ```bash
-# Using pytest
+# Run full regression test suite (~5 minutes)
+python run_regression_tests.py
+
+# Run quick regression tests only (~2 minutes)
+python run_regression_tests.py --quick
+
+# Run verbose tests with detailed output
+python run_regression_tests.py --verbose
+
+# Run specific test category
+python run_regression_tests.py --specific unit
+python run_regression_tests.py --specific integration
+```
+
+The regression suite includes:
+- Configuration validation
+- Memory validation (ensures models don't exceed GPU memory)
+- Parallelism strategy testing (TP, PP, DP)
+- Performance abstractions (LoD) verification
+- Feature testing (prefix caching, chunked prefill)
+
+#### Using pytest directly
+
+```bash
+# Set up environment
+export PYTHONPATH=/path/to/LLMPerfOracle/src
+
+# Run all tests
 pytest tests/
 
-# Run specific test
-pytest tests/test_basic_simulation.py
+# Run specific test categories
+pytest tests/unit/              # Unit tests
+pytest tests/integration/       # Integration tests
+pytest tests/regression/        # Regression tests
 
 # Run quick parallelism tests (demonstrates TP, PP, DP benefits)
 pytest tests/integration/test_parallel_simulation_quick.py -v
@@ -332,7 +416,7 @@ The simulation reports comprehensive caching statistics:
 - Per-request token savings
 - Cache utilization metrics
 
-See `docs/prefix_caching_implementation.md` and `docs/prefix_caching_implementation_status.md` for details.
+See `docs/prefix_caching_implementation.md` for comprehensive details.
 
 ## Future Enhancements
 
