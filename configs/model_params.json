@@ -49,7 +49,8 @@
         "is_tp_shardable_down_proj": true,
         "tp_collective_type": "AllReduce"
       }
-    }
+    },
+    "parameter_bytes_fp16": 14000000000
   },
   "Llama2-13B": {
     "parameters": 13000000000,
@@ -101,7 +102,8 @@
         "total_memory_bytes_per_token_in_batch": 104000000,
         "critical_path_factor": 1.0
       }
-    }
+    },
+    "parameter_bytes_fp16": 26000000000
   },
   "Llama3-8B": {
     "parameters": 8000000000,
@@ -153,7 +155,8 @@
         "total_memory_bytes_per_token_in_batch": 64000000,
         "critical_path_factor": 1.0
       }
-    }
+    },
+    "parameter_bytes_fp16": 16000000000
   },
   "Mistral-7B-v0.3": {
     "parameters": 7000000000,
@@ -205,7 +208,8 @@
         "total_memory_bytes_per_token_in_batch": 56000000,
         "critical_path_factor": 1.0
       }
-    }
+    },
+    "parameter_bytes_fp16": 14000000000
   },
   "GPT-3-175B": {
     "parameters": 175000000000,
@@ -257,10 +261,12 @@
         "total_memory_bytes_per_token_in_batch": 1400000000,
         "critical_path_factor": 1.0
       }
-    }
+    },
+    "parameter_bytes_fp16": 350000000000
   },
   "Llama3-70B": {
     "parameters": 70000000000,
+    "parameter_bytes_fp16": 140000000000,
     "hidden_size": 8192,
     "num_layers": 80,
     "num_attention_heads": 64,
@@ -361,7 +367,8 @@
         "total_memory_bytes_per_token_in_batch": 61600000,
         "critical_path_factor": 1.0
       }
-    }
+    },
+    "parameter_bytes_fp16": 15400000000
   },
   "Qwen2.5-32B": {
     "parameters": 32500000000,
@@ -413,7 +420,8 @@
         "total_memory_bytes_per_token_in_batch": 260000000,
         "critical_path_factor": 1.0
       }
-    }
+    },
+    "parameter_bytes_fp16": 65000000000
   },
   "Qwen2.5-72B": {
     "parameters": 72700000000,
@@ -465,7 +473,8 @@
         "total_memory_bytes_per_token_in_batch": 581600000,
         "critical_path_factor": 1.0
       }
-    }
+    },
+    "parameter_bytes_fp16": 145400000000
   },
   "Mixtral-8x7B": {
     "parameters": 46700000000,
@@ -519,7 +528,8 @@
         "total_memory_bytes_per_token_in_batch": 186800000,
         "critical_path_factor": 1.0
       }
-    }
+    },
+    "parameter_bytes_fp16": 93400000000
   },
   "Gemma2-9B": {
     "parameters": 9240000000,
@@ -571,7 +581,8 @@
         "total_memory_bytes_per_token_in_batch": 73920000,
         "critical_path_factor": 1.0
       }
-    }
+    },
+    "parameter_bytes_fp16": 18480000000
   },
   "Gemma2-27B": {
     "parameters": 27200000000,
@@ -623,6 +634,7 @@
         "total_memory_bytes_per_token_in_batch": 217600000,
         "critical_path_factor": 1.0
       }
-    }
+    },
+    "parameter_bytes_fp16": 54400000000
   }
 }

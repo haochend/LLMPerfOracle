@@ -519,10 +519,24 @@ class ParallelVLLMFramework(VLLMFramework):
                 yield self.stage_input_queues[0].put(mb_state)
             
             # Wait for decode iteration to complete
-            # This is simplified - ideally we'd wait for actual completion signals
-            # For now, wait based on pipeline depth
-            pipeline_latency = 0.01 * self.pp_stages  # Rough estimate
-            yield self.simpy_env.timeout(pipeline_latency)
+            # For decode, we need to wait for the token to traverse all stages
+            # Each stage processes very quickly for a single token
+            # Estimate based on actual compute time + transfer overhead
+            
+            # Compute time per stage for decode (very small for single token)
+            compute_time_per_stage = 0.0001  # 0.1ms per stage for decode
+            
+            # Transfer time between stages (activation size is small for decode)
+            # Hidden size * 2 bytes (fp16) / bandwidth
+            hidden_size = self.model_profile.get('hidden_size', 5120)
+            activation_bytes = hidden_size * 2  # fp16
+            transfer_time = activation_bytes / 600e9  # 600 GB/s NVLink
+            
+            # Total pipeline latency = compute time + transfers
+            total_latency = (compute_time_per_stage * self.pp_stages + 
+                           transfer_time * (self.pp_stages - 1))
+            
+            yield self.simpy_env.timeout(total_latency)
             
             # Update token count
             seq_state.output_tokens_generated += 1

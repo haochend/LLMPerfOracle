@@ -49,6 +49,10 @@ class VLLMFramework(AbstractLLMFramework):
         self.block_size = self.config.get("block_size", 16)
         self.max_running_sequences = self.config.get("max_num_seqs", 256)
         
+        # Validate model fits in memory (for non-parallel configs)
+        if self.parallelism_strategy == 'None':
+            self._validate_memory_requirements()
+        
         # Dynamic batch size calculation
         if "max_num_batched_tokens" in self.config:
             self.max_batched_tokens_per_iteration = self.config["max_num_batched_tokens"]
@@ -93,6 +97,35 @@ class VLLMFramework(AbstractLLMFramework):
             f"max_seqs={self.max_running_sequences}, "
             f"max_batched_tokens={self.max_batched_tokens_per_iteration}"
         )
+    
+    def _validate_memory_requirements(self) -> None:
+        """Validate that the model fits in GPU memory."""
+        # Get model size
+        param_bytes = self.model_profile.get('parameter_bytes_fp16', 0)
+        if param_bytes == 0:
+            # Estimate from parameter count if not specified
+            param_count = self.model_profile.get('parameters', 0)
+            param_bytes = param_count * 2  # 2 bytes per parameter for FP16
+        
+        # Get GPU memory
+        device_info = self.virtual_hardware.get_device_info(self.gpu_id)
+        if not device_info:
+            raise ValueError(f"GPU {self.gpu_id} not found in virtual hardware")
+        
+        gpu_memory_bytes = device_info.memory_capacity_bytes
+        available_memory = gpu_memory_bytes * 0.9  # 90% usable
+        
+        # Check if model fits
+        if param_bytes > available_memory:
+            param_gb = param_bytes / 1e9
+            available_gb = available_memory / 1e9
+            gpu_gb = gpu_memory_bytes / 1e9
+            model_id = self.config.get('model_profile_id', 'unknown')
+            raise ValueError(
+                f"Model {model_id} "
+                f"({param_gb:.1f} GB) exceeds available GPU memory "
+                f"({available_gb:.1f} GB available out of {gpu_gb:.1f} GB total)"
+            )
     
     def _calculate_dynamic_batch_size(self) -> int:
         """Calculate optimal max_num_batched_tokens based on hardware capabilities."""
