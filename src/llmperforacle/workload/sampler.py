@@ -54,7 +54,8 @@ class DistributionSampler:
             
             elif dist_type == "Normal":
                 mean = distribution_config.get("mean", 0.0)
-                std = distribution_config.get("std", 1.0)
+                # Support both 'std' and 'sigma' parameter names
+                std = distribution_config.get("std", distribution_config.get("sigma", 1.0))
                 value = np.random.normal(mean, std)
                 # Ensure non-negative for most use cases
                 value = max(0, value)
@@ -103,6 +104,10 @@ class DistributionSampler:
                 
                 # Recursively sample from selected component
                 value = self.sample(component_config)
+            
+            elif dist_type == "Fixed":
+                # Fixed/constant value (alias for Constant)
+                value = distribution_config.get("value", 1.0)
             
             else:
                 logger.warning(f"Unknown distribution type: {dist_type}, using constant value 1.0")

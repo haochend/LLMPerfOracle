@@ -98,6 +98,11 @@ class ExperimentOrchestrator:
         self.sim_env_wrapper = SimulationEnvironment(self.config["simulation"])
         simpy_env = self.sim_env_wrapper.get_simpy_env()
         
+        # Add metadata to simpy_env for framework access
+        simpy_env.metadata = {
+            'lod': self.sim_env_wrapper.get_lod()
+        }
+        
         # 2. Initialize Metrics Collector
         self.metrics_collector = MetricsCollector(simpy_env, self.config["metrics_config"])
         

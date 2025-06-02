@@ -23,6 +23,7 @@ class SimulationEnvironment:
             config: Simulation-specific configuration containing:
                 - max_simulation_time: Maximum duration for the simulation in simulated seconds
                 - random_seed (optional): Random seed for reproducibility
+                - lod (optional): Level of Detail - "high" (default) or "medium"
         """
         self.env: simpy.Environment = simpy.Environment()
         self.config: Dict[str, Any] = config
@@ -36,6 +37,12 @@ class SimulationEnvironment:
             random.seed(seed)
             np.random.seed(seed)
             logger.info(f"Random seed set to: {seed}")
+        
+        # Set Level of Detail (LoD)
+        self.lod = config.get("lod", "high")
+        if self.lod not in ["high", "medium"]:
+            raise ValueError(f"Invalid LoD setting: {self.lod}. Must be 'high' or 'medium'")
+        logger.info(f"Level of Detail (LoD) set to: {self.lod}")
         
         logger.info("SimulationEnvironment initialized")
     
@@ -92,3 +99,11 @@ class SimulationEnvironment:
             The SimPy Environment instance
         """
         return self.env
+    
+    def get_lod(self) -> str:
+        """Get the Level of Detail setting.
+        
+        Returns:
+            Level of Detail string ("high" or "medium")
+        """
+        return self.lod

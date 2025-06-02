@@ -15,6 +15,18 @@
       "flops_per_token": 14000000000,
       "memory_bytes_per_token": 56000000
     },
+    "aggregated_ops": {
+      "prefill": {
+        "total_flops_per_prompt_token": 14000000000,
+        "total_memory_bytes_per_prompt_token": 28000000,
+        "critical_path_factor": 1.0
+      },
+      "decode": {
+        "total_flops_per_token_in_batch": 14000000000,
+        "total_memory_bytes_per_token_in_batch": 56000000,
+        "critical_path_factor": 1.0
+      }
+    },
     "kv_cache_bytes_per_token_per_layer": 16384,
     "layer_types": {
       "attention": {
@@ -77,6 +89,18 @@
         "is_tp_shardable_down_proj": true,
         "tp_collective_type": "AllReduce"
       }
+    },
+    "aggregated_ops": {
+      "prefill": {
+        "total_flops_per_prompt_token": 26000000000,
+        "total_memory_bytes_per_prompt_token": 52000000,
+        "critical_path_factor": 1.0
+      },
+      "decode": {
+        "total_flops_per_token_in_batch": 26000000000,
+        "total_memory_bytes_per_token_in_batch": 104000000,
+        "critical_path_factor": 1.0
+      }
     }
   },
   "Llama3-8B": {
@@ -116,6 +140,18 @@
         "is_tp_shardable_gate_up": true,
         "is_tp_shardable_down_proj": true,
         "tp_collective_type": "AllReduce"
+      }
+    },
+    "aggregated_ops": {
+      "prefill": {
+        "total_flops_per_prompt_token": 16000000000,
+        "total_memory_bytes_per_prompt_token": 32000000,
+        "critical_path_factor": 1.0
+      },
+      "decode": {
+        "total_flops_per_token_in_batch": 16000000000,
+        "total_memory_bytes_per_token_in_batch": 64000000,
+        "critical_path_factor": 1.0
       }
     }
   },
@@ -157,6 +193,18 @@
         "is_tp_shardable_down_proj": true,
         "tp_collective_type": "AllReduce"
       }
+    },
+    "aggregated_ops": {
+      "prefill": {
+        "total_flops_per_prompt_token": 14000000000,
+        "total_memory_bytes_per_prompt_token": 28000000,
+        "critical_path_factor": 1.0
+      },
+      "decode": {
+        "total_flops_per_token_in_batch": 14000000000,
+        "total_memory_bytes_per_token_in_batch": 56000000,
+        "critical_path_factor": 1.0
+      }
     }
   },
   "GPT-3-175B": {
@@ -196,6 +244,18 @@
         "is_tp_shardable_gate_up": true,
         "is_tp_shardable_down_proj": true,
         "tp_collective_type": "AllReduce"
+      }
+    },
+    "aggregated_ops": {
+      "prefill": {
+        "total_flops_per_prompt_token": 350000000000,
+        "total_memory_bytes_per_prompt_token": 700000000,
+        "critical_path_factor": 1.0
+      },
+      "decode": {
+        "total_flops_per_token_in_batch": 350000000000,
+        "total_memory_bytes_per_token_in_batch": 1400000000,
+        "critical_path_factor": 1.0
       }
     }
   },
@@ -237,6 +297,18 @@
         "is_tp_shardable_down_proj": true,
         "tp_collective_type": "AllReduce"
       }
+    },
+    "aggregated_ops": {
+      "prefill": {
+        "total_flops_per_prompt_token": 140000000000,
+        "total_memory_bytes_per_prompt_token": 280000000,
+        "critical_path_factor": 1.0
+      },
+      "decode": {
+        "total_flops_per_token_in_batch": 140000000000,
+        "total_memory_bytes_per_token_in_batch": 560000000,
+        "critical_path_factor": 1.0
+      }
     }
   },
   "Qwen2.5-7B": {
@@ -276,6 +348,18 @@
         "is_tp_shardable_gate_up": true,
         "is_tp_shardable_down_proj": true,
         "tp_collective_type": "AllReduce"
+      }
+    },
+    "aggregated_ops": {
+      "prefill": {
+        "total_flops_per_prompt_token": 15400000000,
+        "total_memory_bytes_per_prompt_token": 30800000,
+        "critical_path_factor": 1.0
+      },
+      "decode": {
+        "total_flops_per_token_in_batch": 15400000000,
+        "total_memory_bytes_per_token_in_batch": 61600000,
+        "critical_path_factor": 1.0
       }
     }
   },
@@ -317,6 +401,18 @@
         "is_tp_shardable_down_proj": true,
         "tp_collective_type": "AllReduce"
       }
+    },
+    "aggregated_ops": {
+      "prefill": {
+        "total_flops_per_prompt_token": 65000000000,
+        "total_memory_bytes_per_prompt_token": 130000000,
+        "critical_path_factor": 1.0
+      },
+      "decode": {
+        "total_flops_per_token_in_batch": 65000000000,
+        "total_memory_bytes_per_token_in_batch": 260000000,
+        "critical_path_factor": 1.0
+      }
     }
   },
   "Qwen2.5-72B": {
@@ -356,6 +452,18 @@
         "is_tp_shardable_gate_up": true,
         "is_tp_shardable_down_proj": true,
         "tp_collective_type": "AllReduce"
+      }
+    },
+    "aggregated_ops": {
+      "prefill": {
+        "total_flops_per_prompt_token": 145400000000,
+        "total_memory_bytes_per_prompt_token": 290800000,
+        "critical_path_factor": 1.0
+      },
+      "decode": {
+        "total_flops_per_token_in_batch": 145400000000,
+        "total_memory_bytes_per_token_in_batch": 581600000,
+        "critical_path_factor": 1.0
       }
     }
   },
@@ -399,6 +507,18 @@
         "is_tp_shardable_down_proj": true,
         "tp_collective_type": "AllReduce"
       }
+    },
+    "aggregated_ops": {
+      "prefill": {
+        "total_flops_per_prompt_token": 28000000000,
+        "total_memory_bytes_per_prompt_token": 93400000,
+        "critical_path_factor": 1.0
+      },
+      "decode": {
+        "total_flops_per_token_in_batch": 28000000000,
+        "total_memory_bytes_per_token_in_batch": 186800000,
+        "critical_path_factor": 1.0
+      }
     }
   },
   "Gemma2-9B": {
@@ -439,6 +559,18 @@
         "is_tp_shardable_down_proj": true,
         "tp_collective_type": "AllReduce"
       }
+    },
+    "aggregated_ops": {
+      "prefill": {
+        "total_flops_per_prompt_token": 18480000000,
+        "total_memory_bytes_per_prompt_token": 36960000,
+        "critical_path_factor": 1.0
+      },
+      "decode": {
+        "total_flops_per_token_in_batch": 18480000000,
+        "total_memory_bytes_per_token_in_batch": 73920000,
+        "critical_path_factor": 1.0
+      }
     }
   },
   "Gemma2-27B": {
@@ -478,6 +610,18 @@
         "is_tp_shardable_gate_up": true,
         "is_tp_shardable_down_proj": true,
         "tp_collective_type": "AllReduce"
+      }
+    },
+    "aggregated_ops": {
+      "prefill": {
+        "total_flops_per_prompt_token": 54400000000,
+        "total_memory_bytes_per_prompt_token": 108800000,
+        "critical_path_factor": 1.0
+      },
+      "decode": {
+        "total_flops_per_token_in_batch": 54400000000,
+        "total_memory_bytes_per_token_in_batch": 217600000,
+        "critical_path_factor": 1.0
       }
     }
   }

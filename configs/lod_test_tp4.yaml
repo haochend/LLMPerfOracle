@@ -1,0 +1,131 @@
+# Test Scenario B: Tensor Parallelism
+# Focus on Analytical Collectives
+
+simulation:
+  max_simulation_time: 600  # 10 minutes
+  random_seed: 42
+  lod: "high"  # Change to "medium" for comparison
+
+model_characteristics_db_path: "./configs/model_params.json"
+
+hardware_profile:
+  compute_devices:
+    - device_id: "gpu0"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000  # 80 GB
+      memory_gbps: 2039  # GB/s
+      processing_units: 108  # SMs
+    - device_id: "gpu1"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000  # 80 GB
+      memory_gbps: 2039  # GB/s
+      processing_units: 108  # SMs
+    - device_id: "gpu2"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000  # 80 GB
+      memory_gbps: 2039  # GB/s
+      processing_units: 108  # SMs
+    - device_id: "gpu3"
+      device_type: "GPU"
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000  # 80 GB
+      memory_gbps: 2039  # GB/s
+      processing_units: 108  # SMs
+      
+  network_links:
+    # Client to server
+    - link_id: "client_to_server"
+      source_id: "client_node_0"
+      dest_id: "framework_entry_0"
+      bandwidth_bps: 10_000_000_000  # 10 Gbps
+      latency_s: 0.0001  # 100 microseconds
+      bidirectional: true
+    # Inter-GPU links (NVLink-like)
+    - link_id: "gpu0_to_gpu1"
+      source_id: "gpu0"
+      dest_id: "gpu1"
+      bandwidth_bps: 600_000_000_000  # 600 Gbps (NVLink)
+      latency_s: 0.000001  # 1 microsecond
+      bidirectional: true
+    - link_id: "gpu1_to_gpu2"
+      source_id: "gpu1"
+      dest_id: "gpu2"
+      bandwidth_bps: 600_000_000_000  # 600 Gbps
+      latency_s: 0.000001  # 1 microsecond
+      bidirectional: true
+    - link_id: "gpu2_to_gpu3"
+      source_id: "gpu2"
+      dest_id: "gpu3"
+      bandwidth_bps: 600_000_000_000  # 600 Gbps
+      latency_s: 0.000001  # 1 microsecond
+      bidirectional: true
+    - link_id: "gpu3_to_gpu0"
+      source_id: "gpu3"
+      dest_id: "gpu0"
+      bandwidth_bps: 600_000_000_000  # 600 Gbps
+      latency_s: 0.000001  # 1 microsecond
+      bidirectional: true
+
+workload:
+  total_duration: 600
+  bytes_per_token_estimate_for_network: 2
+  random_seed: 123
+  max_turns_per_session: 1
+  
+  client_profiles:
+    - profile_name: "test_load"
+      weight: 1.0
+      inter_arrival_time_dist_config:
+        type: "Exponential"
+        rate: 5.0  # 5 requests per second
+      prompt_tokens_dist_config:
+        type: "Normal"
+        mean: 1024  # Larger prompts to see TP benefits
+        sigma: 128
+        is_int: true
+      max_output_tokens_dist_config:
+        type: "Normal"
+        mean: 256
+        sigma: 32
+        is_int: true
+      turn_type_dist_config:
+        type: "Fixed"
+        value: "new_conversation"
+
+frameworks_to_test:
+  - name: "vllm_tp4"
+    type: "ParallelVLLM"
+    is_target_for_workload: true
+    config:
+      model_profile_id: "Llama3-70B"
+      block_size: 16
+      max_num_seqs: 256
+      enable_prefix_caching: false
+      enable_cross_request_caching: false
+      enable_chunked_prefill: true
+      prefill_chunk_size: 8192
+      parallelism:
+        strategy: "TP"
+        tp_degree: 4
+        gpu_ids: ["gpu0", "gpu1", "gpu2", "gpu3"]
+
+metrics_config:
+  output_summary_json_path: "./experiments/results/lod_test_tp4_summary.json"
+  output_requests_csv_path: "./experiments/results/lod_test_tp4_requests.csv"
+  compute_token_stats: true
+  compute_percentiles:
+    - 50
+    - 90
+    - 95
+    - 99

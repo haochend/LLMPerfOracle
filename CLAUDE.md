@@ -82,6 +82,8 @@ Virtual hardware estimates operation time based on:
 
 ### Running Tests
 
+**IMPORTANT: Always activate the virtual environment before running any Python commands:**
+
 ```bash
 # Set up environment
 cd /Users/davidd/LLMPerfOracle
@@ -247,7 +249,14 @@ LLMPerfOracle/
 
 ## CLI Usage
 
+**IMPORTANT: Always activate the virtual environment before running any Python commands:**
+
 ```bash
+# Activate virtual environment first
+cd /Users/davidd/LLMPerfOracle
+source venv/bin/activate
+export PYTHONPATH=/Users/davidd/LLMPerfOracle/src
+
 # Generate example configuration
 python -m llmperforacle.cli generate-config -o my_config.yaml
 

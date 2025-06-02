@@ -1,0 +1,79 @@
+# Test Scenario A: Single Large Model, Single GPU
+# Focus on Macro Operations for Layers
+
+simulation:
+  max_simulation_time: 600  # 10 minutes
+  random_seed: 42
+  lod: "high"  # Change to "medium" for comparison
+
+model_characteristics_db_path: "./configs/model_params.json"
+
+hardware_profile:
+  compute_devices:
+    - device_id: "gpu0"
+      device_type: "GPU"
+      # A100 80GB profile
+      peak_tflops:
+        fp16: 312
+        int8: 624
+      memory_capacity_bytes: 80_000_000_000  # 80 GB
+      memory_gbps: 2039  # GB/s
+      processing_units: 108  # SMs
+      
+  network_links:
+    - link_id: "client_to_server"
+      source_id: "client_node_0"
+      dest_id: "framework_entry_0"
+      bandwidth_bps: 10_000_000_000  # 10 Gbps
+      latency_s: 0.0001  # 100 microseconds
+      bidirectional: true
+
+workload:
+  total_duration: 600
+  bytes_per_token_estimate_for_network: 2
+  random_seed: 123
+  max_turns_per_session: 1  # Single turn for simpler testing
+  
+  client_profiles:
+    - profile_name: "test_load"
+      weight: 1.0
+      inter_arrival_time_dist_config:
+        type: "Exponential"
+        rate: 2.0  # 2 requests per second
+      prompt_tokens_dist_config:
+        type: "Normal"
+        mean: 512
+        sigma: 64
+        is_int: true
+      max_output_tokens_dist_config:
+        type: "Normal"
+        mean: 256
+        sigma: 32
+        is_int: true
+      turn_type_dist_config:
+        type: "Fixed"
+        value: "new_conversation"
+
+frameworks_to_test:
+  - name: "vllm_single_gpu"
+    type: "VLLM"
+    is_target_for_workload: true
+    config:
+      model_profile_id: "Llama3-70B"  # Large model with 80 layers
+      gpu_id: "gpu0"
+      block_size: 16
+      max_num_seqs: 256
+      enable_prefix_caching: false
+      enable_cross_request_caching: false
+      enable_chunked_prefill: true
+      prefill_chunk_size: 4096
+
+metrics_config:
+  output_summary_json_path: "./experiments/results/lod_test_single_gpu_summary.json"
+  output_requests_csv_path: "./experiments/results/lod_test_single_gpu_requests.csv"
+  compute_token_stats: true
+  compute_percentiles:
+    - 50
+    - 90
+    - 95
+    - 99

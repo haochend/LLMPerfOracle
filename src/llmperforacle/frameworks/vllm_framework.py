@@ -9,6 +9,7 @@ import simpy
 from .abstract_framework import AbstractLLMFramework
 from .models import SequenceState, SessionCacheInfo, GlobalPrefixCacheInfo
 from .prefix_utils import hash_token_sequence, find_longest_prefix_match, should_cache_prefix
+from ..utils.performance_abstractions import CollectiveCommunicationModels
 
 logger = logging.getLogger(__name__)
 
@@ -131,10 +132,10 @@ class VLLMFramework(AbstractLLMFramework):
         
         # 1. Memory limit for attention matrices and activations
         # Reserve memory for model weights and KV cache
-        available_memory_gb = (memory_gb - model_size_gb) * 0.1  # 10% for activations
+        available_memory_gb = max(0.1, (memory_gb - model_size_gb) * 0.1)  # 10% for activations, min 0.1GB
         # Attention memory scales quadratically for prefill
         # Approximate as sqrt to get token count
-        memory_limited = int(math.sqrt(available_memory_gb * 1e9 / (hidden_dim * 4)))
+        memory_limited = int(math.sqrt(max(1e8, available_memory_gb * 1e9) / (hidden_dim * 4)))
         
         # 2. Bandwidth limit
         # Each token needs to read/write model weights and activations
@@ -284,7 +285,7 @@ class VLLMFramework(AbstractLLMFramework):
                     request_id=request.request_id,
                     request=request,
                     status="WAITING_FOR_PREFILL",
-                    allocated_kv_blocks=list(range(required_blocks)),  # Simplified block tracking
+                    allocated_kv_blocks=list(range(int(required_blocks))),  # Simplified block tracking
                     cached_prefix_length_used=cached_prefix_length,
                     num_tokens_requiring_prefill=num_tokens_to_prefill,
                     prompt_tokens_fully_processed=0,  # Will be updated after prefill
@@ -792,7 +793,113 @@ class VLLMFramework(AbstractLLMFramework):
             # Get the current TP GPU group (for now, just use the first one)
             tp_gpu_group = self.tp_gpu_groups[0]
             
-            # Process each layer
+            if self.lod == "medium":
+                # Use macro operations for entire prefill
+                # Get aggregated operation stats
+                ops = self._estimate_prefill_ops(num_tokens, batch_size=1)
+                
+                # Distribute across TP GPUs
+                tp_degree = len(tp_gpu_group)
+                sharded_ops = {
+                    'flops_required_fp16': ops['flops_required_fp16'] / tp_degree,
+                    'memory_read_bytes': ops['memory_read_bytes'] / tp_degree,
+                    'memory_write_bytes': ops['memory_write_bytes'] / tp_degree,
+                    'is_memory_bound_hint': ops.get('is_memory_bound_hint', False)
+                }
+                
+                # Submit parallel compute tasks
+                compute_events = []
+                for i, gpu_id in enumerate(tp_gpu_group):
+                    task_desc = sharded_ops.copy()
+                    task_desc['task_id'] = f"{request_id}_tp{i}_macro"
+                    compute_event = self.virtual_hardware.submit_computation_task(gpu_id, task_desc)
+                    compute_events.append(compute_event)
+                
+                # Wait for all shards
+                yield simpy.AllOf(self.simpy_env, compute_events)
+                
+                # Single collective for entire prefill
+                if tp_degree > 1:
+                    yield from self._simulate_tp_collective(
+                        'AllReduce',
+                        tp_gpu_group,
+                        batch_size=1,
+                        sequence_length=num_tokens,
+                        op_type='prefill_macro'
+                    )
+            else:
+                # High LoD: process each layer
+                num_layers = self.model_profile.get('num_layers', 32)
+                for layer_idx in range(num_layers):
+                    # Alternate between attention and MLP layers
+                    if layer_idx % 2 == 0:
+                        layer_type = 'attention'
+                    else:
+                        layer_type = 'mlp'
+                    
+                    layer_stats = self._get_layer_stats(layer_type)
+                    if not layer_stats:
+                        # Fallback to regular prefill stats
+                        layer_stats = {
+                            'flops_per_token_prefill': self.model_profile['prefill_op_stats']['flops_per_token'] / num_layers,
+                            'memory_bytes_per_token_prefill': self.model_profile['prefill_op_stats']['memory_bytes_per_token'] / num_layers,
+                            'tp_collective_type': 'AllReduce'
+                        }
+                    
+                    # Dispatch TP sharded operation
+                    yield from self._dispatch_tp_shardable_operation(
+                        layer_stats,
+                        batch_size=1,
+                        sequence_length=num_tokens,
+                        op_type=f'{layer_type}_prefill',
+                        tp_collective_type=layer_stats.get('tp_collective_type', 'AllReduce'),
+                        tp_gpu_group=tp_gpu_group,
+                        request_id=f"{request_id}_layer_{layer_idx}"
+                    )
+        
+        return self.simpy_env.process(_tp_prefill())
+    
+    def _execute_tp_decode(self, batch_size: int) -> simpy.events.Event:
+        """Execute decode with tensor parallelism."""
+        # Get the current TP GPU group
+        tp_gpu_group = self.tp_gpu_groups[0]
+        
+        if self.lod == "medium":
+            # Use macro operations for entire decode step
+            # Get aggregated operation stats
+            ops = self._estimate_decode_op(batch_size)
+            
+            # Distribute across TP GPUs
+            tp_degree = len(tp_gpu_group)
+            sharded_ops = {
+                'flops_required_fp16': ops['flops_required_fp16'] / tp_degree,
+                'memory_read_bytes': ops['memory_read_bytes'] / tp_degree,
+                'memory_write_bytes': ops['memory_write_bytes'] / tp_degree,
+                'is_memory_bound_hint': ops.get('is_memory_bound_hint', True)
+            }
+            
+            # Submit parallel compute tasks
+            compute_events = []
+            for i, gpu_id in enumerate(tp_gpu_group):
+                task_desc = sharded_ops.copy()
+                task_desc['task_id'] = f"decode_batch_{self.simpy_env.now}_tp{i}_macro"
+                compute_event = self.virtual_hardware.submit_computation_task(gpu_id, task_desc)
+                compute_events.append(compute_event)
+            
+            # Wait for all shards
+            yield simpy.AllOf(self.simpy_env, compute_events)
+            
+            # Single collective for entire decode
+            if tp_degree > 1:
+                yield from self._simulate_tp_collective(
+                    'AllReduce',
+                    tp_gpu_group,
+                    batch_size=batch_size,
+                    sequence_length=1,
+                    op_type='decode_macro'
+                )
+        else:
+            # High LoD: process each layer
             num_layers = self.model_profile.get('num_layers', 32)
             for layer_idx in range(num_layers):
                 # Alternate between attention and MLP layers
@@ -803,59 +910,23 @@ class VLLMFramework(AbstractLLMFramework):
                 
                 layer_stats = self._get_layer_stats(layer_type)
                 if not layer_stats:
-                    # Fallback to regular prefill stats
+                    # Fallback to regular decode stats
                     layer_stats = {
-                        'flops_per_token_prefill': self.model_profile['prefill_op_stats']['flops_per_token'] / num_layers,
-                        'memory_bytes_per_token_prefill': self.model_profile['prefill_op_stats']['memory_bytes_per_token'] / num_layers,
+                        'flops_per_token_decode': self.model_profile['decode_op_stats']['flops_per_token'] / num_layers,
+                        'memory_bytes_per_token_decode': self.model_profile['decode_op_stats']['memory_bytes_per_token'] / num_layers,
                         'tp_collective_type': 'AllReduce'
                     }
                 
                 # Dispatch TP sharded operation
                 yield from self._dispatch_tp_shardable_operation(
                     layer_stats,
-                    batch_size=1,
-                    sequence_length=num_tokens,
-                    op_type=f'{layer_type}_prefill',
+                    batch_size=batch_size,
+                    sequence_length=1,  # Decode processes one token at a time
+                    op_type=f'{layer_type}_decode',
                     tp_collective_type=layer_stats.get('tp_collective_type', 'AllReduce'),
                     tp_gpu_group=tp_gpu_group,
-                    request_id=f"{request_id}_layer_{layer_idx}"
+                    request_id=f"decode_batch_{self.simpy_env.now}_layer_{layer_idx}"
                 )
-        
-        return self.simpy_env.process(_tp_prefill())
-    
-    def _execute_tp_decode(self, batch_size: int) -> simpy.events.Event:
-        """Execute decode with tensor parallelism."""
-        # Get the current TP GPU group
-        tp_gpu_group = self.tp_gpu_groups[0]
-        
-        # Process each layer
-        num_layers = self.model_profile.get('num_layers', 32)
-        for layer_idx in range(num_layers):
-            # Alternate between attention and MLP layers
-            if layer_idx % 2 == 0:
-                layer_type = 'attention'
-            else:
-                layer_type = 'mlp'
-            
-            layer_stats = self._get_layer_stats(layer_type)
-            if not layer_stats:
-                # Fallback to regular decode stats
-                layer_stats = {
-                    'flops_per_token_decode': self.model_profile['decode_op_stats']['flops_per_token'] / num_layers,
-                    'memory_bytes_per_token_decode': self.model_profile['decode_op_stats']['memory_bytes_per_token'] / num_layers,
-                    'tp_collective_type': 'AllReduce'
-                }
-            
-            # Dispatch TP sharded operation
-            yield from self._dispatch_tp_shardable_operation(
-                layer_stats,
-                batch_size=batch_size,
-                sequence_length=1,  # Decode processes one token at a time
-                op_type=f'{layer_type}_decode',
-                tp_collective_type=layer_stats.get('tp_collective_type', 'AllReduce'),
-                tp_gpu_group=tp_gpu_group,
-                request_id=f"decode_batch_{self.simpy_env.now}_layer_{layer_idx}"
-            )
     
     def _dispatch_tp_shardable_operation(
         self,
@@ -926,29 +997,63 @@ class VLLMFramework(AbstractLLMFramework):
         # For attention/MLP output, we need to all-reduce activations
         activation_size = batch_size * sequence_length * hidden_size * bytes_per_element
         
-        # Simplified ring collective simulation
         num_gpus = len(gpu_group)
         if num_gpus <= 1:
             return
         
-        # For ring allreduce, each GPU sends/receives data in a ring pattern
-        # Simplified: just simulate point-to-point transfers in a ring
-        collective_events = []
-        
-        for i in range(num_gpus):
-            source_gpu = gpu_group[i]
-            dest_gpu = gpu_group[(i + 1) % num_gpus]
+        if self.lod == "medium":
+            # Use analytical model for collective communication
+            # Get network link parameters (assume uniform links between GPUs)
+            # Try to find a link between first two GPUs as representative
+            link_bandwidth_bps = 100e9  # Default 100 Gbps
+            link_latency_s = 1e-6  # Default 1 microsecond
             
-            # Each step transfers 1/N of the data
-            transfer_size = activation_size / num_gpus
+            if len(gpu_group) >= 2:
+                # Try to access the network link from virtual hardware
+                link_key = (gpu_group[0], gpu_group[1])
+                if hasattr(self.virtual_hardware, 'network_links'):
+                    link = self.virtual_hardware.network_links.get(link_key)
+                    if not link:
+                        # Try reverse direction
+                        link_key = (gpu_group[1], gpu_group[0])
+                        link = self.virtual_hardware.network_links.get(link_key)
+                    
+                    if link:
+                        link_bandwidth_bps = link.bandwidth_bps
+                        link_latency_s = link.latency_s
             
-            transfer_event = self.virtual_hardware.submit_network_transfer_task(
-                source_gpu,
-                dest_gpu,
-                transfer_size
+            # Calculate collective time using analytical model
+            collective_time = CollectiveCommunicationModels.get_collective_time(
+                collective_type,
+                activation_size,
+                num_gpus,
+                link_bandwidth_bps,
+                link_latency_s
             )
-            collective_events.append(transfer_event)
-        
-        # In a real ring allreduce, these would be pipelined
-        # For simplicity, we wait for all transfers
-        yield simpy.AllOf(self.simpy_env, collective_events)
+            
+            # Simply wait for the calculated time
+            yield self.simpy_env.timeout(collective_time)
+            
+        else:
+            # High LoD: detailed simulation
+            # For ring allreduce, each GPU sends/receives data in a ring pattern
+            # Simplified: just simulate point-to-point transfers in a ring
+            collective_events = []
+            
+            for i in range(num_gpus):
+                source_gpu = gpu_group[i]
+                dest_gpu = gpu_group[(i + 1) % num_gpus]
+                
+                # Each step transfers 1/N of the data
+                transfer_size = activation_size / num_gpus
+                
+                transfer_event = self.virtual_hardware.submit_network_transfer_task(
+                    source_gpu,
+                    dest_gpu,
+                    transfer_size
+                )
+                collective_events.append(transfer_event)
+            
+            # In a real ring allreduce, these would be pipelined
+            # For simplicity, we wait for all transfers
+            yield simpy.AllOf(self.simpy_env, collective_events)

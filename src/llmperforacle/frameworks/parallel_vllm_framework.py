@@ -72,6 +72,9 @@ class ParallelVLLMFramework(VLLMFramework):
         # Track sequences pending deletion (completed but still have active microbatches)
         self.sequences_pending_deletion: Dict[str, Any] = {}
         
+        # Track prefill microbatch counts to know when prefill is complete
+        self.prefill_microbatch_count: Dict[str, int] = {}
+        
         # Start pipeline stage worker processes
         for stage_idx in range(self.pp_stages):
             self.simpy_env.process(self._pipeline_stage_worker_process(stage_idx))
@@ -152,11 +155,14 @@ class ParallelVLLMFramework(VLLMFramework):
     
     def _pp_processing_loop(self) -> simpy.events.Event:
         """Pipeline parallel processing loop."""
-        logger.info(f"Starting PP processing loop for {self.framework_id}")
+        logger.info(f"Starting PP processing loop for {self.framework_id} with LoD: {self.lod}")
         
         while True:
             # Try to admit new sequences from arrival queue
             newly_admitted = yield from self._admit_new_sequences()
+            
+            if newly_admitted:
+                logger.debug(f"PP admitted {len(newly_admitted)} new requests")
             
             # Create microbatches for newly admitted requests
             for request in newly_admitted:
@@ -170,6 +176,11 @@ class ParallelVLLMFramework(VLLMFramework):
     
     def _create_and_dispatch_microbatches(self, request: Any) -> simpy.events.Event:
         """Create microbatches for a request and dispatch to first stage."""
+        # Set prefill start time for the sequence
+        seq_state = self.running_sequences.get(request.request_id)
+        if seq_state and seq_state.prefill_start_time < 0:
+            seq_state.prefill_start_time = self.simpy_env.now
+        
         num_microbatches = self.num_microbatches
         tokens_per_microbatch = request.prompt_num_tokens // num_microbatches
         remainder_tokens = request.prompt_num_tokens % num_microbatches
@@ -196,8 +207,11 @@ class ParallelVLLMFramework(VLLMFramework):
             # Dispatch to first stage
             yield self.stage_input_queues[0].put(mb_state)
         
-        # Track active microbatch indices for this request (for easier removal tracking)
+        # Track active microbatch indices for this request
         self.active_microbatches[request.request_id] = set(range(num_microbatches))
+        
+        # Track that this is a prefill phase
+        self.prefill_microbatch_count[request.request_id] = num_microbatches
         
         logger.debug(
             f"Created {num_microbatches} microbatches for request {request.request_id}"
@@ -244,9 +258,98 @@ class ParallelVLLMFramework(VLLMFramework):
         if not seq_state:
             seq_state = self.sequences_pending_deletion.get(microbatch.request_id)
             if not seq_state:
-                logger.warning(f"Sequence {microbatch.request_id} not found in running or pending")
+                # This can happen if microbatches arrive out of order
+                # Just skip processing this microbatch
+                logger.debug(f"Sequence {microbatch.request_id} already completed, skipping microbatch")
+                yield self.simpy_env.timeout(0)
                 return
         
+        # Check if we should use aggregated operations for medium LoD
+        if self.lod == "medium":
+            # Use aggregated operations for the entire stage
+            logger.debug(f"Using aggregated operations for stage {stage_idx} (LoD: {self.lod})")
+            yield from self._process_stage_layers_aggregated(
+                stage_idx, microbatch, start_layer, end_layer
+            )
+        else:
+            # High LoD: Process each layer individually
+            logger.debug(f"Using detailed operations for stage {stage_idx} (LoD: {self.lod})")
+            yield from self._process_stage_layers_detailed(
+                stage_idx, microbatch, start_layer, end_layer
+            )
+    
+    def _process_stage_layers_aggregated(
+        self, stage_idx: int, microbatch: MicrobatchState, 
+        start_layer: int, end_layer: int
+    ) -> simpy.events.Event:
+        """Process stage layers using aggregated operations (medium LoD)."""
+        from ..utils.performance_abstractions import MacroOperations
+        
+        # Calculate aggregated operations for this stage
+        stage_layers = range(start_layer, end_layer + 1)
+        
+        if microbatch.is_prefill:
+            ops = MacroOperations.estimate_pp_stage_ops(
+                self.model_profile,
+                stage_layers,
+                "prefill",
+                microbatch.data_size_tokens,
+                self.lod
+            )
+        else:
+            # For decode, batch size is 1
+            ops = MacroOperations.estimate_pp_stage_ops(
+                self.model_profile,
+                stage_layers,
+                "decode",
+                1,  # Decode processes one token at a time
+                self.lod
+            )
+        
+        # Execute computation based on parallelism within stage
+        if self.parallelism_strategy == 'TP_PP' and len(self.current_tp_gpu_group) > 1:
+            # Distribute across TP GPUs
+            tp_degree = len(self.current_tp_gpu_group)
+            sharded_ops = {
+                'flops_required_fp16': ops['flops_required_fp16'] / tp_degree,
+                'memory_read_bytes': ops['memory_read_bytes'] / tp_degree,
+                'memory_write_bytes': ops['memory_write_bytes'] / tp_degree,
+                'is_memory_bound_hint': not microbatch.is_prefill,
+                'task_id': f"{microbatch.request_id}_mb{microbatch.microbatch_idx}_stage{stage_idx}_aggregated"
+            }
+            
+            # Submit parallel tasks
+            compute_events = []
+            for i, gpu_id in enumerate(self.current_tp_gpu_group):
+                task_desc = sharded_ops.copy()
+                task_desc['task_id'] = f"{task_desc['task_id']}_tp{i}"
+                compute_event = self.virtual_hardware.submit_computation_task(gpu_id, task_desc)
+                compute_events.append(compute_event)
+            
+            # Wait for all shards
+            yield simpy.AllOf(self.simpy_env, compute_events)
+            
+            # Single collective for entire stage
+            if tp_degree > 1:
+                yield from self._simulate_tp_collective(
+                    'AllReduce',
+                    self.current_tp_gpu_group,
+                    batch_size=1,
+                    sequence_length=microbatch.data_size_tokens if microbatch.is_prefill else 1,
+                    op_type=f'stage{stage_idx}_{"prefill" if microbatch.is_prefill else "decode"}'
+                )
+        else:
+            # Single GPU computation for entire stage
+            gpu_id = self.current_tp_gpu_group[0]
+            ops['task_id'] = f"{microbatch.request_id}_mb{microbatch.microbatch_idx}_stage{stage_idx}_aggregated"
+            
+            yield self.virtual_hardware.submit_computation_task(gpu_id, ops)
+    
+    def _process_stage_layers_detailed(
+        self, stage_idx: int, microbatch: MicrobatchState,
+        start_layer: int, end_layer: int
+    ) -> simpy.events.Event:
+        """Process stage layers individually (high LoD)."""
         # Process each layer in this stage
         for layer_idx in range(start_layer, end_layer + 1):
             # Determine layer type (alternating attention/MLP)
@@ -343,6 +446,7 @@ class ParallelVLLMFramework(VLLMFramework):
         """Handle completion of a microbatch at the last stage."""
         # Check if we're tracking this request
         if microbatch.request_id not in self.active_microbatches:
+            yield self.simpy_env.timeout(0)  # Still yield control
             return
         
         # Remove this microbatch index from active set
@@ -361,21 +465,29 @@ class ParallelVLLMFramework(VLLMFramework):
                 yield from self._release_sequence_resources(seq_state)
                 logger.debug(f"Released pending sequence {microbatch.request_id}")
             elif microbatch.is_prefill:
-                # Prefill complete, update sequence state
-                seq_state = self.running_sequences.get(microbatch.request_id)
-                if seq_state:
-                    seq_state.status = "DECODING"
-                    seq_state.prompt_tokens_processed = seq_state.request.prompt_num_tokens
-                
-                # Log first token time
-                self.metrics_collector.log_first_token_generated(
-                    seq_state.request.request_id,
-                    self.simpy_env.now,
-                    seq_state.prefill_start_time
-                )
-                
-                # Start decode iterations
-                yield from self._start_decode_iterations(seq_state)
+                # Check if ALL prefill microbatches are complete
+                if microbatch.request_id in self.prefill_microbatch_count:
+                    # This was the last prefill microbatch
+                    del self.prefill_microbatch_count[microbatch.request_id]
+                    
+                    # Prefill complete, update sequence state
+                    seq_state = self.running_sequences.get(microbatch.request_id)
+                    if seq_state:
+                        logger.debug(f"All prefill microbatches complete for {microbatch.request_id}, starting decode")
+                        seq_state.status = "DECODING"
+                        seq_state.prompt_tokens_processed = seq_state.request.prompt_num_tokens
+                        
+                        # Log first token time
+                        self.metrics_collector.log_first_token_generated(
+                            seq_state.request.request_id,
+                            self.simpy_env.now,
+                            seq_state.prefill_start_time
+                        )
+                        
+                        # Start decode iterations
+                        yield from self._start_decode_iterations(seq_state)
+                    else:
+                        logger.warning(f"No sequence state found for completed prefill {microbatch.request_id}")
         
         yield self.simpy_env.timeout(0)  # Yield control
     
@@ -406,9 +518,11 @@ class ParallelVLLMFramework(VLLMFramework):
                 # Dispatch to first stage
                 yield self.stage_input_queues[0].put(mb_state)
             
-            # Wait for decode iteration to complete (simplified)
-            # In reality, would need proper synchronization
-            yield self.simpy_env.timeout(0.001)
+            # Wait for decode iteration to complete
+            # This is simplified - ideally we'd wait for actual completion signals
+            # For now, wait based on pipeline depth
+            pipeline_latency = 0.01 * self.pp_stages  # Rough estimate
+            yield self.simpy_env.timeout(pipeline_latency)
             
             # Update token count
             seq_state.output_tokens_generated += 1

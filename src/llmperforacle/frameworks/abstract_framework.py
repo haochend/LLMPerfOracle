@@ -6,6 +6,8 @@ from typing import Any, Dict, Optional, List
 
 import simpy
 
+from ..utils.performance_abstractions import MacroOperations
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,7 +51,17 @@ class AbstractLLMFramework(ABC):
         self.parallelism_config = self.config.get('parallelism', {})
         self._parse_parallelism_config()
         
-        logger.info(f"Initialized {self.__class__.__name__} framework: {framework_id}")
+        # Get Level of Detail setting
+        # Try to get from framework config first, then from sim env if available
+        self.lod = self.config.get('lod', 'high')
+        if hasattr(simpy_env, 'lod'):
+            # If simpy_env is wrapped in SimulationEnvironment
+            self.lod = simpy_env.lod
+        elif hasattr(simpy_env, 'metadata') and 'lod' in simpy_env.metadata:
+            # Alternative way to pass LoD
+            self.lod = simpy_env.metadata['lod']
+        
+        logger.info(f"Initialized {self.__class__.__name__} framework: {framework_id} (LoD: {self.lod})")
     
     @abstractmethod
     def handle_incoming_request(self, request: Any) -> simpy.Process:
@@ -103,16 +115,27 @@ class AbstractLLMFramework(ABC):
         Returns:
             Dictionary with flops, memory_read_bytes, memory_write_bytes
         """
-        prefill_stats = self.model_profile.get("prefill_op_stats", {})
-        flops_per_token = prefill_stats.get("flops_per_token", 2e9)
-        memory_bytes_per_token = prefill_stats.get("memory_bytes_per_token", 1e3)
-        
-        return {
-            "flops_required_fp16": flops_per_token * num_prompt_tokens * batch_size,
-            "memory_read_bytes": memory_bytes_per_token * num_prompt_tokens * batch_size,
-            "memory_write_bytes": memory_bytes_per_token * num_prompt_tokens * batch_size / 2,
-            "is_memory_bound_hint": False,  # Prefill is typically compute-bound
-        }
+        if self.lod == "medium":
+            # Use macro operations for aggregated computation
+            ops = MacroOperations.estimate_macro_prefill_ops(
+                self.model_profile, 
+                num_prompt_tokens * batch_size,
+                self.lod
+            )
+            ops["is_memory_bound_hint"] = False  # Prefill is typically compute-bound
+            return ops
+        else:
+            # High LoD: detailed calculation
+            prefill_stats = self.model_profile.get("prefill_op_stats", {})
+            flops_per_token = prefill_stats.get("flops_per_token", 2e9)
+            memory_bytes_per_token = prefill_stats.get("memory_bytes_per_token", 1e3)
+            
+            return {
+                "flops_required_fp16": flops_per_token * num_prompt_tokens * batch_size,
+                "memory_read_bytes": memory_bytes_per_token * num_prompt_tokens * batch_size,
+                "memory_write_bytes": memory_bytes_per_token * num_prompt_tokens * batch_size / 2,
+                "is_memory_bound_hint": False,  # Prefill is typically compute-bound
+            }
     
     def _estimate_decode_op(self, batch_size: int) -> Dict[str, Any]:
         """Estimate computational requirements for one decode step.
@@ -123,16 +146,27 @@ class AbstractLLMFramework(ABC):
         Returns:
             Dictionary with flops, memory_read_bytes, memory_write_bytes
         """
-        decode_stats = self.model_profile.get("decode_op_stats", {})
-        flops_per_token = decode_stats.get("flops_per_token", 3e9)
-        memory_bytes_per_token = decode_stats.get("memory_bytes_per_token", 1.5e3)
-        
-        return {
-            "flops_required_fp16": flops_per_token * batch_size,
-            "memory_read_bytes": memory_bytes_per_token * batch_size,
-            "memory_write_bytes": memory_bytes_per_token * batch_size / 2,
-            "is_memory_bound_hint": True,  # Decode is typically memory-bound
-        }
+        if self.lod == "medium":
+            # Use macro operations for aggregated computation
+            ops = MacroOperations.estimate_macro_decode_ops(
+                self.model_profile,
+                batch_size,
+                self.lod
+            )
+            ops["is_memory_bound_hint"] = True  # Decode is typically memory-bound
+            return ops
+        else:
+            # High LoD: detailed calculation
+            decode_stats = self.model_profile.get("decode_op_stats", {})
+            flops_per_token = decode_stats.get("flops_per_token", 3e9)
+            memory_bytes_per_token = decode_stats.get("memory_bytes_per_token", 1.5e3)
+            
+            return {
+                "flops_required_fp16": flops_per_token * batch_size,
+                "memory_read_bytes": memory_bytes_per_token * batch_size,
+                "memory_write_bytes": memory_bytes_per_token * batch_size / 2,
+                "is_memory_bound_hint": True,  # Decode is typically memory-bound
+            }
     
     def _estimate_kv_cache_request_bytes(self, num_tokens: int) -> int:
         """Estimate KV cache size for a given number of tokens.
