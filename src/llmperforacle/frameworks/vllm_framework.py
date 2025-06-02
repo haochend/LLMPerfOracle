@@ -813,6 +813,7 @@ class VLLMFramework(AbstractLLMFramework):
         """Get current framework status."""
         return {
             "framework_id": self.framework_id,
+            "lod": self.lod,
             "queue_length": len(self.request_arrival_queue.items),
             "waiting_sequences": len(self.waiting_sequences),
             "running_sequences": len(self.running_sequences),

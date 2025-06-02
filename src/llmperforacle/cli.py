@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 
 from llmperforacle.orchestration import ExperimentOrchestrator
+from llmperforacle.utils.config_validator import validate_and_fix_config, validate_model_db
 
 # Configure logging
 logging.basicConfig(
@@ -168,6 +169,54 @@ def generate_config(output: str, format: str):
             json.dump(example_config, f, indent=2)
     
     click.echo(f"Generated example configuration at {output_path}")
+
+
+@cli.command()
+@click.argument("config_file", type=click.Path(exists=True))
+@click.option(
+    "--fix", "-f", is_flag=True,
+    help="Attempt to fix configuration issues automatically"
+)
+@click.option(
+    "--validate-models", "-m", is_flag=True,
+    help="Also validate the model characteristics database"
+)
+def validate(config_file: str, fix: bool, validate_models: bool):
+    """Validate a configuration file without running the simulation."""
+    click.echo(f"Validating configuration: {config_file}")
+    
+    try:
+        # Validate configuration
+        is_valid, errors, config = validate_and_fix_config(config_file)
+        
+        if is_valid:
+            click.echo(click.style("✓ Configuration is valid", fg="green"))
+        else:
+            click.echo(click.style(f"✗ Configuration has {len(errors)} errors:", fg="red"))
+            for i, error in enumerate(errors[:20], 1):
+                click.echo(f"  {i}. {error}")
+            if len(errors) > 20:
+                click.echo(f"  ... and {len(errors) - 20} more errors")
+        
+        # Validate model database if requested
+        if validate_models and config and "model_characteristics_db_path" in config:
+            model_db_path = config["model_characteristics_db_path"]
+            click.echo(f"\nValidating model database: {model_db_path}")
+            
+            model_valid, model_errors = validate_model_db(model_db_path)
+            if model_valid:
+                click.echo(click.style("✓ Model database is valid", fg="green"))
+            else:
+                click.echo(click.style(f"✗ Model database has {len(model_errors)} errors:", fg="red"))
+                for i, error in enumerate(model_errors[:10], 1):
+                    click.echo(f"  {i}. {error}")
+        
+        # Exit with appropriate code
+        sys.exit(0 if is_valid else 1)
+        
+    except Exception as e:
+        click.echo(click.style(f"Error validating configuration: {e}", fg="red"))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

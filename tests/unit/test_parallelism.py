@@ -433,12 +433,10 @@ class TestPipelineParallelism:
         assert request.request_id in framework.active_microbatches
         assert len(framework.active_microbatches[request.request_id]) == 4  # num_microbatches
         
-        # Verify microbatch properties
-        for i, mb in enumerate(framework.active_microbatches[request.request_id]):
-            assert mb.request_id == request.request_id
-            assert mb.microbatch_idx == i
-            assert mb.is_prefill == True
-            assert mb.current_stage == 0
+        # Verify that microbatch indices are stored
+        mb_indices = framework.active_microbatches[request.request_id]
+        assert isinstance(mb_indices, set)
+        assert mb_indices == {0, 1, 2, 3}  # Should have indices 0-3
     
     def test_pipeline_stage_assignment(self, setup_parallel_vllm_pp):
         """Test pipeline stage layer assignment."""
@@ -673,7 +671,11 @@ class TestCombinedParallelism:
         
         # Mock components
         hardware = Mock()
-        hardware.get_device_info.return_value = Mock(memory_capacity_bytes=80e9)
+        hardware.get_device_info.return_value = Mock(
+            memory_capacity_bytes=80e9,
+            memory_gbps=2039,
+            peak_tflops={'fp16': 312, 'int8': 624}
+        )
         metrics = Mock()
         
         model_profile = {

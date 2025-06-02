@@ -12,17 +12,24 @@ from llmperforacle.metrics.collector import MetricsCollector
 class MockVirtualHardware:
     """Mock virtual hardware for testing."""
     
+    def __init__(self, simpy_env):
+        self.simpy_env = simpy_env
+    
     def get_device_info(self, device_id):
-        return type('DeviceInfo', (), {'memory_capacity_bytes': 80_000_000_000})()
+        return type('DeviceInfo', (), {
+            'memory_capacity_bytes': 80_000_000_000,
+            'memory_gbps': 2039,
+            'peak_tflops': {'fp16': 312, 'int8': 624}
+        })()
     
     def allocate_memory(self, device_id, bytes_to_allocate):
-        return simpy.Environment().timeout(0)
+        return self.simpy_env.timeout(0)
     
     def free_memory(self, device_id, bytes_to_free):
-        return simpy.Environment().timeout(0)
+        return self.simpy_env.timeout(0)
     
     def submit_computation_task(self, device_id, task_desc):
-        return simpy.Environment().timeout(0)
+        return self.simpy_env.timeout(0.001)
 
 
 class TestPrefixCachingEdgeCases:
@@ -32,6 +39,9 @@ class TestPrefixCachingEdgeCases:
     def setup_framework(self):
         """Set up a vLLM framework with prefix caching enabled."""
         env = simpy.Environment()
+        
+        # Add metadata for LoD
+        env.metadata = {'lod': 'high'}
         
         config = {
             "gpu_id": "gpu0",
@@ -50,7 +60,10 @@ class TestPrefixCachingEdgeCases:
             "decode_op_stats": {
                 "flops_per_token": 1e8,
                 "memory_bytes_per_token": 5e5
-            }
+            },
+            "parameters": 7e9,
+            "parameter_bytes_fp16": 14e9,
+            "hidden_size": 4096
         }
         
         metrics_config = {
@@ -63,7 +76,7 @@ class TestPrefixCachingEdgeCases:
             framework_id="test_vllm",
             simpy_env=env,
             framework_specific_config=config,
-            virtual_hardware=MockVirtualHardware(),
+            virtual_hardware=MockVirtualHardware(env),
             metrics_collector=metrics_collector,
             model_profile=model_profile,
         )

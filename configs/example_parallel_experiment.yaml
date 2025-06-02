@@ -82,7 +82,7 @@ hardware_profile:
     # Client to framework links
     - link_id: "client_to_server"
       source_id: "client_node_0"
-      dest_id: "framework_entry_0"
+      dest_id: "gpu0"
       bandwidth_bps: 10_000_000_000  # 10 Gbps
       latency_s: 0.0001  # 100 microseconds
       bidirectional: true
@@ -249,7 +249,7 @@ frameworks_to_test:
     type: "ParallelVLLM"
     is_target_for_workload: false
     config:
-      model_profile_id: "LargeModel-100B"
+      model_profile_id: "Llama3-70B"
       block_size: 16
       max_num_seqs: 128
       max_num_batched_tokens: 8192

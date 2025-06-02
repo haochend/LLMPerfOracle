@@ -14,6 +14,7 @@ from ..frameworks.parallel_vllm_framework import ParallelVLLMFramework
 from ..hardware import HardwareResourceProfile, VirtualHardwarePlatform
 from ..metrics import MetricsCollector
 from ..workload import WorkloadGenerator
+from ..utils.config_validator import ExperimentConfigValidator
 
 logger = logging.getLogger(__name__)
 
@@ -55,26 +56,21 @@ class ExperimentOrchestrator:
     
     def _validate_config(self) -> None:
         """Validate the experiment configuration structure."""
-        required_sections = [
-            "simulation",
-            "hardware_profile",
-            "model_characteristics_db_path",
-            "workload",
-            "frameworks_to_test",
-            "metrics_config",
-        ]
+        # Use comprehensive validator
+        is_valid, errors = ExperimentConfigValidator.validate(self.config)
         
-        for section in required_sections:
-            if section not in self.config:
-                raise ValueError(f"Missing required configuration section: {section}")
-        
-        # Validate simulation config
-        if "max_simulation_time" not in self.config["simulation"]:
-            raise ValueError("simulation.max_simulation_time is required")
-        
-        # Validate frameworks
-        if not self.config["frameworks_to_test"]:
-            raise ValueError("At least one framework must be configured")
+        if not is_valid:
+            logger.error(f"Configuration validation failed with {len(errors)} errors:")
+            for i, error in enumerate(errors[:10], 1):
+                logger.error(f"  {i}. {error}")
+            if len(errors) > 10:
+                logger.error(f"  ... and {len(errors) - 10} more errors")
+            
+            # Raise with the first few errors
+            error_summary = "; ".join(errors[:3])
+            if len(errors) > 3:
+                error_summary += f" (and {len(errors) - 3} more errors)"
+            raise ValueError(f"Configuration validation failed: {error_summary}")
         
         logger.info("Configuration validated successfully")
     
@@ -98,10 +94,8 @@ class ExperimentOrchestrator:
         self.sim_env_wrapper = SimulationEnvironment(self.config["simulation"])
         simpy_env = self.sim_env_wrapper.get_simpy_env()
         
-        # Add metadata to simpy_env for framework access
-        simpy_env.metadata = {
-            'lod': self.sim_env_wrapper.get_lod()
-        }
+        # The SimulationEnvironment already sets metadata with LoD,
+        # so we don't need to set it again here
         
         # 2. Initialize Metrics Collector
         self.metrics_collector = MetricsCollector(simpy_env, self.config["metrics_config"])

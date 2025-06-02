@@ -106,6 +106,44 @@ pytest tests/integration/test_parallel_simulation_quick.py -v
 pytest tests/integration/test_parallel_simulation_improved.py -v
 ```
 
+### Running Regression Tests
+
+The project includes a comprehensive regression test suite to ensure system stability after changes:
+
+```bash
+# Run full regression test suite
+./run_regression_tests.py
+
+# Run quick regression tests only (faster)
+./run_regression_tests.py --quick
+
+# Run with verbose output
+./run_regression_tests.py --verbose
+
+# Run specific test
+./run_regression_tests.py --specific test_memory_validation
+
+# Skip certain test types
+./run_regression_tests.py --no-unit      # Skip unit tests
+./run_regression_tests.py --no-regression # Skip regression tests
+```
+
+The regression suite tests:
+- **Configuration Validation**: All example configs are valid
+- **Model Database**: All models have correct parameters
+- **Memory Validation**: Models fail appropriately when they don't fit
+- **Parallelism**: TP, PP, and mixed strategies work correctly
+- **Performance**: PP latency is reasonable (not 55x worse)
+- **LoD Speedup**: Medium LoD provides >20x event reduction (aggressive threshold)
+- **Features**: Prefix caching, chunked prefill work correctly
+
+Run regression tests after:
+- Modifying parallelism implementations
+- Changing configuration validation
+- Updating model parameters
+- Modifying framework behavior
+- Any significant refactoring
+
 ### Debugging Simulations
 
 1. Set log level to DEBUG in CLI: `llmperforacle run config.yaml -l DEBUG`
@@ -190,6 +228,13 @@ yield self.simpy_env.process(
 yield self.virtual_hardware.submit_computation_task(...)
 ```
 
+### LoD Not Being Applied
+If LoD (Level of Detail) setting is not being respected:
+- Check that `SimulationEnvironment` sets metadata: `self.env.metadata = {'lod': self.lod}`
+- Ensure `ExperimentOrchestrator` doesn't overwrite metadata after initialization
+- Frameworks access LoD via: `simpy_env.metadata['lod']`
+- Use regression test `TestLoDRegression::test_lod_event_reduction` to verify LoD works
+
 ### Network Link Warnings
 Add bidirectional links in hardware config:
 ```yaml
@@ -260,12 +305,33 @@ export PYTHONPATH=/Users/davidd/LLMPerfOracle/src
 # Generate example configuration
 python -m llmperforacle.cli generate-config -o my_config.yaml
 
+# Validate configuration before running
+python -m llmperforacle.cli validate my_config.yaml
+python -m llmperforacle.cli validate my_config.yaml -m  # Also validate model DB
+
 # Run simulation
 python -m llmperforacle.cli run my_config.yaml -l INFO
 
 # With custom log level
 python -m llmperforacle.cli run my_config.yaml -l DEBUG
 ```
+
+## Configuration Validation
+
+The system includes comprehensive configuration validation to catch issues before running simulations:
+
+- **Automatic validation** when loading configurations
+- **Memory checks** to ensure models fit on assigned GPUs
+- **Parameter validation** for all configuration fields
+- **Model database validation** for consistency
+
+Common issues caught:
+- Models too large for GPU memory
+- Invalid GPU references in parallelism configs
+- Missing required fields
+- Inconsistent parameter values
+
+See `src/llmperforacle/utils/config_validator.py` for validation implementation.
 
 ## Future Extension Points
 

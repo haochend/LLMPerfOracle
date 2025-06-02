@@ -33,7 +33,7 @@ def test_basic_simulation():
                 {
                     "link_id": "client_link",
                     "source_id": "client_node_0",
-                    "dest_id": "framework_entry_0",
+                    "dest_id": "gpu0",
                     "bandwidth_bps": 1_000_000_000,
                     "latency_s": 0.001,
                 }

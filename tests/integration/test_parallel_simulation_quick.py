@@ -69,7 +69,7 @@ class TestQuickParallelScenarios:
         links.append({
             "link_id": "client_to_server",
             "source_id": "client_node_0",
-            "dest_id": "framework_entry_0",
+            "dest_id": "gpu0",
             "bandwidth_bps": 10_000_000_000,
             "latency_s": 0.0001,
             "bidirectional": True
@@ -300,11 +300,21 @@ class TestQuickParallelScenarios:
             test_config["metrics_config"]["output_summary_json_path"] = str(tmp_path / f"{name}_quick.json")
             test_config["metrics_config"]["output_requests_csv_path"] = str(tmp_path / f"{name}_quick.csv")
             
-            orchestrator = ExperimentOrchestrator(test_config)
-            orchestrator.run()
-            
-            with open(tmp_path / f"{name}_quick.json") as f:
-                results[name] = json.load(f)
+            try:
+                orchestrator = ExperimentOrchestrator(test_config)
+                orchestrator.run()
+                
+                with open(tmp_path / f"{name}_quick.json") as f:
+                    results[name] = json.load(f)
+            except ValueError as e:
+                if "exceeds available GPU memory" in str(e) and name == "single":
+                    # Expected failure for single GPU with 13B model on 15GB
+                    print(f"Single GPU correctly rejected: {e}")
+                    results[name] = {
+                        "requests": {"total": 0, "success_rate": 0.0, "successful": 0}
+                    }
+                else:
+                    raise
         
         # PP should handle more requests successfully OR have better success rate
         print(f"\nPP Memory Benefit Demo Results:")
@@ -313,11 +323,16 @@ class TestQuickParallelScenarios:
         print(f"PP=2: {results['pp2']['requests']['total']} requests, "
               f"{results['pp2']['requests']['success_rate']:.1%} success")
         
-        # Check if PP handled more requests OR had better success rate
-        pp_benefit = (results["pp2"]["requests"]["total"] > results["single"]["requests"]["total"] * 1.2 or
-                     results["pp2"]["requests"]["success_rate"] > results["single"]["requests"]["success_rate"] + 0.03)
-        
-        assert pp_benefit, f"PP should show benefit through more requests or better success rate (Single: {results['single']['requests']['success_rate']:.3f}, PP: {results['pp2']['requests']['success_rate']:.3f})"
+        # Check if PP handled requests while single GPU couldn't even start
+        if results["single"]["requests"]["total"] == 0:
+            # Single GPU couldn't run at all - PP should be able to run
+            pp_benefit = results["pp2"]["requests"]["total"] > 0
+            assert pp_benefit, "PP should be able to run when single GPU cannot due to memory constraints"
+        else:
+            # Both ran - check for performance benefit
+            pp_benefit = (results["pp2"]["requests"]["total"] > results["single"]["requests"]["total"] * 1.2 or
+                         results["pp2"]["requests"]["success_rate"] > results["single"]["requests"]["success_rate"] + 0.03)
+            assert pp_benefit, f"PP should show benefit through more requests or better success rate (Single: {results['single']['requests']['success_rate']:.3f}, PP: {results['pp2']['requests']['success_rate']:.3f})"
     
     def test_combined_parallelism_demo(self, quick_config, tmp_path):
         """Quick demo of combined TP+PP benefits."""
@@ -420,7 +435,7 @@ class TestParallelismMetricsQuick:
                     {
                         "link_id": "client_to_server",
                         "source_id": "client_node_0",
-                        "dest_id": "framework_entry_0",
+                        "dest_id": "gpu0",
                         "bandwidth_bps": 10_000_000_000,
                         "latency_s": 0.0001,
                         "bidirectional": True

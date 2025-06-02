@@ -44,6 +44,9 @@ class SimulationEnvironment:
             raise ValueError(f"Invalid LoD setting: {self.lod}. Must be 'high' or 'medium'")
         logger.info(f"Level of Detail (LoD) set to: {self.lod}")
         
+        # Attach metadata to the SimPy environment so frameworks can access it
+        self.env.metadata = {'lod': self.lod}
+        
         logger.info("SimulationEnvironment initialized")
     
     def schedule_process(self, process_generator_func: Callable, *args, **kwargs) -> simpy.Process:

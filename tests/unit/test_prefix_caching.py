@@ -13,7 +13,11 @@ class MockVirtualHardware:
     """Mock virtual hardware for testing."""
     
     def get_device_info(self, device_id):
-        return type('DeviceInfo', (), {'memory_capacity_bytes': 80_000_000_000})()
+        return type('DeviceInfo', (), {
+            'memory_capacity_bytes': 80_000_000_000,
+            'memory_gbps': 2039,
+            'peak_tflops': {'fp16': 312, 'int8': 624}
+        })()
     
     def allocate_memory(self, device_id, bytes_to_allocate):
         return simpy.Environment().timeout(0)

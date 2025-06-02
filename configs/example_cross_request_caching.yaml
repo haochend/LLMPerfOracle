@@ -20,7 +20,7 @@ hardware_profile:
   network_links:
     - link_id: "client_to_server"
       source_id: "client_node_0"
-      dest_id: "framework_entry_0"
+      dest_id: "gpu0"
       bandwidth_bps: 10_000_000_000
       latency_s: 0.0001
       bidirectional: true
@@ -31,7 +31,7 @@ frameworks_to_test:
     is_target_for_workload: true
     config:
       gpu_id: "gpu0"
-      model_profile_id: "llama2-7b"
+      model_profile_id: "Llama2-7B"
       block_size: 16
       max_num_seqs: 32
       max_num_batched_tokens: 2048
